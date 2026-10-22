@@ -1,0 +1,188 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+@custom-variant dark (&:is(.dark *));
+
+/* WareOrb design tokens (docs/design-handoff.md → Design tokens), mapped onto shadcn's variables. */
+:root {
+  --radius: 0.5rem;
+  --background: #09090b;
+  --foreground: #fafafa;
+  --card: #111114;
+  --card-foreground: #fafafa;
+  --popover: #0c0c0f;
+  --popover-foreground: #fafafa;
+  --primary: #fafafa;
+  --primary-foreground: #09090b;
+  --secondary: #27272a;
+  --secondary-foreground: #fafafa;
+  --muted: #18181b;
+  --muted-foreground: #a1a1aa;
+  --accent: #27272a;
+  --accent-foreground: #fafafa;
+  --destructive: #ef4444;
+  --border: #27272a;
+  --input: #27272a;
+  --ring: #4f8bea;
+
+  --panel: #0c0c0f;
+  --inset: #0e0e11;
+  --inset-2: #121216;
+  --raised: #18181b;
+  --raised-2: #1b1b20;
+  --raised-3: #1c1c21;
+  --hover-row: #17171b;
+  --border-inner: #1f1f24;
+  --border-strong: #3f3f46;
+  --text-2: #d4d4d8;
+  --faint: #71717a;
+  --disabled: #52525b;
+  --brand: #4f8bea;
+  --brand-light: #8db1f3;
+  --brand-value: #9dbdf5;
+  --warn: #e3bd78;
+  --ok: #22c55e;
+  --ok-light: #4ade80;
+}
+
+@theme inline {
+  --font-sans: "Geist Variable", "Geist", system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-panel: var(--panel);
+  --color-inset: var(--inset);
+  --color-inset-2: var(--inset-2);
+  --color-raised: var(--raised);
+  --color-raised-2: var(--raised-2);
+  --color-raised-3: var(--raised-3);
+  --color-hover-row: var(--hover-row);
+  --color-border-inner: var(--border-inner);
+  --color-border-strong: var(--border-strong);
+  --color-text-2: var(--text-2);
+  --color-faint: var(--faint);
+  --color-disabled: var(--disabled);
+  --color-brand: var(--brand);
+  --color-brand-light: var(--brand-light);
+  --color-brand-value: var(--brand-value);
+  --color-warn: var(--warn);
+  --color-ok: var(--ok);
+  --color-ok-light: var(--ok-light);
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  --animate-fade-up: fade-up 0.3s ease;
+  --animate-slide-in: slide-in 0.22s ease;
+  --animate-blink: blink 2s infinite;
+  --animate-blink-fast: blink 1.4s infinite;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    scrollbar-color: #3f3f46 transparent;
+    scrollbar-width: thin;
+  }
+  html,
+  body {
+    margin: 0;
+    height: 100%;
+    background: var(--background);
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  button {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #3f3f46;
+    border-radius: 3px;
+  }
+}
+
+/* Pointer cursor while hovering a zone or bay in the 3D view (set from the scene). */
+body[data-pointing="1"] .wh-viewport.cursor-grab {
+  cursor: pointer;
+}
+
+@layer utilities {
+  .label-caps {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+}
+
+@media (prefers-reduced-motion) {
+  *,
+  ::before,
+  ::after {
+    animation: none !important;
+  }
+}
