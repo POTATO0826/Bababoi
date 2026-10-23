@@ -5,6 +5,7 @@ import * as THREE from "three";
 import type { FloorId } from "@/data/catalog";
 import { AREAS, BAY_GAP, FLOOR_D, FLOOR_W, LIFT_H, LIFTS, RACK_ROWS, type Rect } from "@/data/layout";
 import { rig } from "./camera-rig";
+import { useInbound } from "@/ledger";
 import { PENDING_RECT } from "./furniture/placements";
 
 const SLAB_H = 1.6;
@@ -397,11 +398,12 @@ function DockDoor({ x }: { x: number }) {
 }
 
 export function Structure({ floor }: { floor: FloorId }) {
+  const inbound = useInbound();
   return (
     <group>
       <Slab />
       <Markings />
-      {floor === 1 && <PendingMark />}
+      {floor === 1 && inbound && <PendingMark />}
       <Racks />
       {LIFTS.map((r, i) => (
         <Lift key={i} rect={r} />

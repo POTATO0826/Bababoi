@@ -1,13 +1,17 @@
 import "./index.css";
+import { ConvexProvider } from "convex/react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { convex } from "./convex";
 import { useWare } from "./store";
 
 const elem = document.getElementById("root")!;
 const app = (
   <StrictMode>
-    <App />
+    <ConvexProvider client={convex}>
+      <App />
+    </ConvexProvider>
   </StrictMode>
 );
 

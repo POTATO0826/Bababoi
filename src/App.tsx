@@ -1,6 +1,5 @@
-import { useEffect } from "react";
-import { resumePendingIcons } from "@/actions";
 import { Header } from "@/components/header";
+import { LedgerSync } from "@/components/ledger-sync";
 import { InventoryColumn } from "@/components/inventory/inventory-column";
 import { ReceiveDialog } from "@/components/inventory/receive-dialog";
 import { JarvisSession } from "@/components/jarvis/jarvis-session";
@@ -26,11 +25,9 @@ export function App() {
   const fixedRows = tier === "wide" || tier === "mid";
   const cols = COLUMNS[tier];
 
-  // Icons that were still generating when the page closed.
-  useEffect(resumePendingIcons, []);
-
   return (
     <TooltipProvider delayDuration={300}>
+      <LedgerSync />
       <div className={cn("grid grid-rows-[52px_minmax(0,1fr)]", fixedRows ? "h-screen" : "min-h-screen")}>
         <Header />
         <div

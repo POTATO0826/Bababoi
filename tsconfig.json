@@ -23,7 +23,8 @@
     "noImplicitOverride": true,
 
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@convex/*": ["./convex/*"]
     },
 
     // Some stricter flags (disabled by default)

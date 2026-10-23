@@ -253,7 +253,7 @@ export function buildSeed(now: number): SeedData {
     settings: {
       ageing: { minAgeDays: 90, windowDays: 30, maxSales: 0 },
       replenish: { windowDays: 30, coverageDays: 21, budgetSen: 2_000_000 },
-      lowStockThreshold: 4,
+      lowStockThreshold: 2,
       demoMode: true,
     },
   };

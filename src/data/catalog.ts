@@ -295,9 +295,6 @@ export function seedRows(): Omit<SkuRecord, "bays">[] {
 
 export const DEMO_SKU = "SOFA-HAVN-2140";
 
-/** The one supplier note still awaiting human verification (concept §5). */
-export const PENDING_NOTE = { id: "DN-2291", sku: DEMO_SKU, qty: 4 } as const;
-
 export const available = (s: Pick<Sku, "onHand" | "reserved">) => s.onHand - s.reserved;
 export const isLow = (s: Sku, threshold: number) => available(s) <= threshold;
 export const skuTitle = (s: Sku) => `${s.model.name} · ${s.variant}`;
@@ -325,22 +322,7 @@ export function matchesQuery(s: Sku, q: string) {
   return `${s.sku} ${s.model.name} ${s.variant} ${s.category.name}`.toLowerCase().includes(q);
 }
 
-const HISTORY: Record<string, Movement[]> = {
-  "SOFA-HAVN-2140": [
-    { t: "09:12", text: "Received · DN-2291", d: "+4" },
-    { t: "Yesterday", text: "Reserved · Booking B-1180", d: "−2" },
-    { t: "Mon", text: "Dispatched · Order O-5531", d: "−1" },
-  ],
-};
-
-/** Movements recorded in this session first, then the seed history. */
+/** Recorded stock movements for a SKU, newest first. */
 export function historyFor(s: Sku): Movement[] {
-  const seed = s.addedAt
-    ? []
-    : (HISTORY[s.sku] ?? [
-        { t: "Today", text: `Reserved · Booking B-${1100 + s.onHand * 7}`, d: `−${Math.min(s.reserved, 2)}` },
-        { t: "Tue", text: `Received · DN-${2200 + s.onHand * 3}`, d: `+${Math.min(s.onHand, s.cap)}` },
-        { t: "Last week", text: "Count verified · J. Lim", d: "0" },
-      ]);
-  return [...(s.movements ?? []), ...seed].slice(0, 5);
+  return (s.movements ?? []).slice(0, 5);
 }

@@ -1,10 +1,16 @@
+import type { FunctionReturnType } from "convex/server";
 import { create } from "zustand";
-import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
+import type { api } from "@convex/_generated/api";
 import type { CategoryId, FloorId, SkuRecord, ZoneId } from "@/data/catalog";
-import { deriveInventory, seedRecords } from "@/data/inventory";
+import { deriveInventory } from "@/data/inventory";
+import type { Actor, Role } from "@/domain/types";
 
 export type ViewMode = "iso" | "top";
 export type OrbState = "idle" | "listening" | "thinking" | "speaking";
+export type Stage = "inventory" | "receive" | "ageing" | "deals" | "replenish";
+export type Lang = "auto" | "en" | "zh";
+export type Snapshot = NonNullable<FunctionReturnType<typeof api.ledger.snapshot>>;
+export type Detail = { kind: "deal" | "receipt" | "batch"; id: string } | null;
 
 export interface TranscriptLine {
   who: "ai" | "user";
@@ -18,9 +24,19 @@ export interface Settings {
   showEmptyBays: boolean;
 }
 
+export const PEOPLE: Record<Role, string> = { owner: "Mei", sales: "Arif", warehouse: "J. Lim" };
+
 export interface WareState {
-  /** The stock ledger — the source of truth. Persisted. */
+  /** Per-SKU records derived from the Convex batch ledger (see <LedgerSync/>). Read-only mirror. */
   skus: SkuRecord[];
+  /** The latest Convex snapshot (null until loaded). */
+  ledger: Snapshot | null;
+  ledgerReady: boolean;
+
+  role: Role;
+  stage: Stage;
+  detail: Detail;
+  lang: Lang;
 
   floor: FloorId;
   view: ViewMode;
@@ -35,7 +51,7 @@ export interface WareState {
   query: string;
   /** Details popup inside the viewport. */
   panelOpen: boolean;
-  /** "Receive new model" dialog. */
+  /** "New model" dialog. */
   receiveOpen: boolean;
   /** Scene fades out while the floor swaps. */
   fading: boolean;
@@ -51,8 +67,10 @@ export interface WareState {
   settings: Settings;
 }
 
+const params = () => (typeof location === "undefined" ? new URLSearchParams() : new URLSearchParams(location.search));
+
 function readSettings(): Settings {
-  const p = typeof location === "undefined" ? new URLSearchParams() : new URLSearchParams(location.search);
+  const p = params();
   const flag = (k: string, d: boolean) => (p.has(k) ? p.get(k) !== "0" && p.get(k) !== "false" : d);
   const threshold = Number(p.get("lowStockThreshold"));
   return {
@@ -63,78 +81,79 @@ function readSettings(): Settings {
   };
 }
 
-/** localStorage that never throws (private windows, blocked site data). */
-const safeStorage: StateStorage = {
-  getItem: (k) => {
+const ROLE_KEY = "wareorb-role";
+function readRole(): Role {
+  const r = params().get("role") ?? (() => {
     try {
-      return localStorage.getItem(k);
+      return localStorage.getItem(ROLE_KEY);
     } catch {
       return null;
     }
-  },
-  setItem: (k, v) => {
-    try {
-      localStorage.setItem(k, v);
-    } catch {
-      // storage full or blocked — the session still works in memory
-    }
-  },
-  removeItem: (k) => {
-    try {
-      localStorage.removeItem(k);
-    } catch {
-      // ignore
-    }
-  },
-};
+  })();
+  return r === "sales" || r === "warehouse" ? r : "owner";
+}
 
-export const useWare = create<WareState>()(
-  persist(
-    (): WareState => ({
-      skus: seedRecords(),
+// The ledger used to live in localStorage; it is now in Convex.
+try {
+  localStorage.removeItem("wareorb-ledger");
+} catch {
+  // storage blocked
+}
 
-      floor: 1,
-      view: "iso",
-      theta: 0,
-      zoomMul: 1,
-      zone: null,
-      selected: null,
-      openCat: "sofas",
-      hoverBay: null,
-      query: "",
-      panelOpen: false,
-      receiveOpen: false,
-      fading: false,
-      dragging: false,
+export const useWare = create<WareState>()(() => ({
+  skus: [],
+  ledger: null,
+  ledgerReady: false,
 
-      agentOpen: false,
-      muted: false,
-      interim: "",
-      orb: "idle",
-      transcript: [{ who: "ai", text: "Ready. Ask me where something is or how many are left." }],
-      micError: null,
+  role: readRole(),
+  stage: "inventory",
+  detail: null,
+  lang: "auto",
 
-      settings: readSettings(),
-    }),
-    {
-      name: "wareorb-ledger",
-      version: 1,
-      storage: createJSONStorage(() => safeStorage),
-      partialize: (s) => ({ skus: s.skus }),
-    },
-  ),
-);
+  floor: 1,
+  view: "iso",
+  theta: 0,
+  zoomMul: 1,
+  zone: null,
+  selected: null,
+  openCat: "sofas",
+  hoverBay: null,
+  query: "",
+  panelOpen: false,
+  receiveOpen: false,
+  fading: false,
+  dragging: false,
+
+  agentOpen: false,
+  muted: false,
+  interim: "",
+  orb: "idle",
+  transcript: [{ who: "ai", text: "Ready. Ask me where something is or how many are left." }],
+  micError: null,
+
+  settings: readSettings(),
+}));
 
 export const setWare = useWare.setState;
 export const getWare = useWare.getState;
+
+export function setRole(role: Role) {
+  setWare({ role });
+  try {
+    localStorage.setItem(ROLE_KEY, role);
+  } catch {
+    // storage blocked — role still applies for this tab
+  }
+}
+
+/** Who is acting (simulated role), sent with every Convex write. */
+export const actorNow = (): Actor => {
+  const role = getWare().role;
+  return { role, name: PEOPLE[role] };
+};
 
 /** Derived inventory for the current ledger (memoised). */
 export const getInventory = () => deriveInventory(getWare().skus);
 export function useInventory() {
   return deriveInventory(useWare((s) => s.skus));
-}
-
-/** Restore the seed ledger (drops received models and recorded movements). */
-export function resetLedger() {
-  setWare({ skus: seedRecords(), selected: null, zone: null, hoverBay: null, panelOpen: false });
 }

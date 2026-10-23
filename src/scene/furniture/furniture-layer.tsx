@@ -4,6 +4,7 @@ import * as THREE from "three";
 import type { FloorId } from "@/data/catalog";
 import type { Bay } from "@/data/inventory";
 import { useInventory, useWare } from "@/store";
+import { useInbound } from "@/ledger";
 import { placementsFor, type Placement } from "./placements";
 import { getTemplate, type TemplateId } from "./templates";
 
@@ -96,15 +97,16 @@ const HOVER_LINE = new THREE.Color("#fafafa");
 
 export function FurnitureLayer({ floor }: { floor: FloorId }) {
   const bays = useInventory().bays[floor];
+  const inbound = useInbound()?.qty ?? 0;
   const groups = useMemo(() => {
     const by = new Map<TemplateId, Placement[]>();
-    for (const p of placementsFor(floor, bays)) {
+    for (const p of placementsFor(floor, bays, inbound)) {
       const list = by.get(p.tpl) ?? [];
       list.push(p);
       by.set(p.tpl, list);
     }
     return [...by.entries()];
-  }, [floor, bays]);
+  }, [floor, bays, inbound]);
 
   useFrame(({ camera }) => {
     // Keep the outline about 2px wide whatever the zoom.

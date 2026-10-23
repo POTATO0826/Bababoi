@@ -1,19 +1,17 @@
-import { PackagePlusIcon, RefreshCwIcon, SparklesIcon } from "lucide-react";
-import { requestIcon, selectSku } from "@/actions";
+import { PackagePlusIcon, SparklesIcon } from "lucide-react";
+import { resetDemo, selectSku } from "@/actions";
 import { CardHeading } from "@/components/common";
 import { SkuIconTile } from "@/components/sku-thumb";
 import { Button } from "@/components/ui/button";
-import { available, isLow, seedRows, skuTitle, type Sku } from "@/data/catalog";
+import { available, isLow, skuTitle, type Sku } from "@/data/catalog";
 import { cn } from "@/lib/utils";
-import { resetLedger, setWare, useInventory, useWare } from "@/store";
-
-const SEED_COUNT = seedRows().length;
+import { setWare, useInventory, useWare } from "@/store";
 const timeLabel = (t: number) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 
 /** New furniture models received into free bays. A model leaves this list (and the map) when it runs out. */
 export function NewArrivals() {
   const inv = useInventory();
-  const touched = useWare((s) => s.skus.length !== SEED_COUNT || s.skus.some((r) => r.addedAt || r.movements?.length));
+  const role = useWare((s) => s.role);
 
   return (
     <section className="flex flex-none flex-col overflow-hidden rounded-xl border border-border bg-card">
@@ -27,7 +25,7 @@ export function NewArrivals() {
 
       {inv.newArrivals.length === 0 ? (
         <p className="border-t border-border-inner px-3.5 py-3 text-[12.5px] text-faint">
-          When a new model comes in, add it here. It’s placed in free bays, shown on the map, and given an AI icon.
+          No new models yet.
         </p>
       ) : (
         inv.newArrivals.map((s) => <ArrivalRow key={s.sku} sku={s} />)
@@ -37,14 +35,15 @@ export function NewArrivals() {
         <Button
           variant="outline"
           onClick={() => setWare({ receiveOpen: true })}
-          disabled={inv.freeBays === 0}
+          disabled={inv.freeBays === 0 || role !== "warehouse"}
+          title={role !== "warehouse" ? "Warehouse only" : undefined}
           className="h-8 flex-1 bg-transparent text-[12.5px] shadow-none dark:bg-transparent"
         >
           <PackagePlusIcon data-icon="inline-start" />
           Receive new model
         </Button>
-        {touched && (
-          <Button variant="quiet" size="sm" onClick={resetLedger} className="h-8 text-[12px]" title="Restore the original demo stock">
+        {role === "owner" && (
+          <Button variant="quiet" size="sm" onClick={() => void resetDemo()} className="h-8 text-[12px]">
             Reset demo
           </Button>
         )}
@@ -94,26 +93,11 @@ function ArrivalRow({ sku: s }: { sku: Sku }) {
 }
 
 function IconStatus({ sku: s }: { sku: Sku }) {
-  if (s.iconStatus === "ready") return null;
-  if (s.iconStatus === "pending") {
-    return (
-      <span className="mt-1 flex items-center gap-1.5 text-[11.5px] text-brand-light">
-        <SparklesIcon className="size-3 animate-pulse" />
-        Generating icon…
-      </span>
-    );
-  }
+  if (s.iconStatus !== "pending") return null;
   return (
-    <span className="mt-1 flex items-center gap-1.5 text-[11.5px] text-faint">
-      {s.iconStatus === "unavailable" ? "AI icon off — set ANTHROPIC_API_KEY" : "Icon failed"}
-      <button
-        onClick={() => void requestIcon(s.sku)}
-        className="inline-flex items-center gap-1 text-muted-foreground transition-colors hover:text-foreground"
-        aria-label="Retry icon"
-      >
-        <RefreshCwIcon className="size-3" />
-        Retry
-      </button>
+    <span className="mt-1 flex items-center gap-1.5 text-[11.5px] text-brand-light">
+      <SparklesIcon className="size-3 animate-pulse" />
+      Generating icon…
     </span>
   );
 }

@@ -1,24 +1,21 @@
 // Composite actions shared by the inventory list, the 3D scene and the Jarvis voice agent.
 import { toast } from "sonner";
+import { api } from "@convex/_generated/api";
+import { convex, errorText, run } from "@/convex";
 import {
   CATEGORY_INFO,
   DEMO_SKU,
-  PENDING_NOTE,
   available,
   isLow,
-  skuTitle,
   type Category,
   type CategoryId,
   type FloorId,
-  type Movement,
   type ShapeOption,
   type Sku,
-  type SkuRecord,
   type ZoneId,
 } from "@/data/catalog";
 import { baysNeeded, planBays, slotLabel } from "@/data/inventory";
-import { SLOT_BY_ID } from "@/data/layout";
-import { getInventory, getWare, setWare, type ViewMode } from "@/store";
+import { actorNow, getInventory, getWare, setWare, type ViewMode } from "@/store";
 
 const timers = new Set<ReturnType<typeof setTimeout>>();
 function later(fn: () => void, ms: number) {
@@ -326,8 +323,12 @@ function answer(q: string) {
   }
 
   if (/analy|today|change|report|summary/.test(q)) {
+    const dayStart = new Date().setHours(0, 0, 0, 0);
+    const today = (s.ledger?.movements ?? []).filter((m) => m.at >= dayStart);
+    const sum = (kind: string) => today.filter((m) => m.kind === kind).reduce((a, m) => a + m.qty, 0);
+    const pending = (s.ledger?.receipts ?? []).filter((r) => r.status === "needs_review").length;
     speak(
-      `Today: +4 units received (${PENDING_NOTE.id}, verified 09:12), −1 dispatched, 2 new reservations. One supplier note is still pending, so its ${PENDING_NOTE.qty} units are not in physical stock yet.`,
+      `Today: +${sum("receive")} received, −${sum("dispatch")} dispatched.${pending ? ` ${pending} delivery ${pending === 1 ? "note is" : "notes are"} still awaiting verification, so ${pending === 1 ? "its" : "their"} units are not in stock yet.` : ""}`,
     );
     return;
   }
@@ -381,28 +382,8 @@ export function runCommand(text: string) {
   }, 600);
 }
 
-// ── Stock ledger: new models, movements, out-of-stock removal ─────────────
-// People confirm every change (the AI never edits stock); each change is logged on the SKU.
-
-const nowLabel = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-
-function updateRecord(code: string, fn: (r: SkuRecord) => SkuRecord | null) {
-  setWare((st) => ({
-    skus: st.skus.flatMap((r) => {
-      if (r.sku !== code) return [r];
-      const next = fn(r);
-      return next ? [next] : [];
-    }),
-  }));
-}
-
-/** Floor/zone of a record follow its first bay. */
-function withBays(r: SkuRecord, bays: string[]): SkuRecord {
-  const first = SLOT_BY_ID.get(bays[0] ?? "");
-  return first ? { ...r, bays, floor: first.floor, zone: first.zone } : { ...r, bays };
-}
-
-const logMovement = (r: SkuRecord, m: Omit<Movement, "t">): Movement[] => [{ t: nowLabel(), ...m }, ...(r.movements ?? [])].slice(0, 12);
+// ── Stock ledger ──────────────────────────────────────────────────────────
+// Every change is a role-checked Convex mutation; the map updates from the live snapshot.
 
 export interface NewModelInput {
   category: CategoryId;
@@ -431,126 +412,40 @@ export function previewPlacement(category: CategoryId, shape: ShapeOption, units
   return { need, bays, label: slotLabel(bays), fits: bays.length >= need };
 }
 
-export function receiveNewModel(input: NewModelInput): { ok: true } | { ok: false; error: string } {
-  const st = getWare();
-  const code = input.sku.trim().toUpperCase();
-  if (st.skus.some((r) => r.sku === code && r.onHand > 0)) return { ok: false, error: `${code} already exists.` };
-  const cap = capFor(input.category, input.shape);
-  const place = previewPlacement(input.category, input.shape, input.onHand);
-  if (!place.fits) {
-    return { ok: false, error: `Not enough free bays: needs ${place.need}, ${place.bays.length} free.` };
-  }
-  const record = withBays(
-    {
-      sku: code,
-      variant: input.variant.trim(),
-      color: input.color,
-      floor: 1,
-      zone: "A",
-      onHand: input.onHand,
-      reserved: 0,
-      incoming: input.incoming,
-      category: input.category,
-      model: input.model.trim(),
-      kind: input.shape.kind,
-      cap,
-      doors: input.shape.doors ?? 2,
-      bays: [],
-      addedAt: Date.now(),
-      iconStatus: "pending",
-      movements: [{ t: nowLabel(), text: "Received · new model", d: `+${input.onHand}` }],
-    },
-    place.bays,
-  );
-  // Drop any earlier out-of-stock row with the same code, then add.
-  setWare((s) => ({ skus: [...s.skus.filter((r) => r.sku !== code), record], query: "", receiveOpen: false }));
-
-  const sku = getInventory().byCode.get(code)!;
-  toast.success(`${skuTitle(sku)} added`, { description: `${input.onHand} units placed at ${place.label}` });
-  selectSku(sku);
-  void requestIcon(code);
-  return { ok: true };
-}
-
-/** Ask the server to have Claude draw an icon for the model. Falls back to the swatch when unavailable. */
-export async function requestIcon(code: string) {
-  const r = getWare().skus.find((x) => x.sku === code);
-  if (!r) return;
-  updateRecord(code, (x) => ({ ...x, iconStatus: "pending" }));
-  const category = CATEGORY_INFO.find((c) => c.id === r.category)!.name;
+/** Warehouse adds a model the catalogue doesn't have and places the counted units. */
+export async function receiveNewModel(input: NewModelInput): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const res = await fetch("/api/icon", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: r.model, variant: r.variant, category, color: r.color, kind: r.kind }),
+    const code = await convex.mutation(api.receiving.createModel, {
+      actor: actorNow(),
+      category: input.category,
+      kind: input.shape.kind,
+      cap: capFor(input.category, input.shape),
+      doors: input.shape.doors ?? 2,
+      model: input.model,
+      variant: input.variant,
+      color: input.color,
+      code: input.sku,
+      units: input.onHand,
     });
-    const data = (await res.json().catch(() => ({}))) as { svg?: string; error?: string };
-    if (res.ok && data.svg) {
-      updateRecord(code, (x) => ({ ...x, icon: data.svg, iconStatus: "ready" }));
-    } else {
-      updateRecord(code, (x) => ({ ...x, iconStatus: res.status === 501 ? "unavailable" : "failed" }));
-      if (res.status !== 501) toast.error("Couldn’t generate the icon", { description: data.error ?? `HTTP ${res.status}` });
-    }
-  } catch {
-    updateRecord(code, (x) => ({ ...x, iconStatus: "failed" }));
-  }
-}
-
-let resumed = false;
-/** Retry icons that were mid-generation when the page was closed (once per page load). */
-export function resumePendingIcons() {
-  if (resumed) return;
-  resumed = true;
-  for (const r of getWare().skus) if (r.iconStatus === "pending") void requestIcon(r.sku);
-}
-
-/** Dispatch (stock leaves) or receive (stock arrives) units of an existing SKU. */
-export function recordMovement(code: string, type: "dispatch" | "receive", qty: number): { ok: true } | { ok: false; error: string } {
-  const st = getWare();
-  const r = st.skus.find((x) => x.sku === code);
-  if (!r || qty <= 0) return { ok: false, error: "Nothing to record." };
-
-  if (type === "dispatch") {
-    if (qty > r.onHand) return { ok: false, error: `Only ${r.onHand} on hand.` };
-    const onHand = r.onHand - qty;
-    if (onHand === 0) {
-      removeOutOfStock(r);
-      return { ok: true };
-    }
-    updateRecord(code, (x) => ({
-      ...withBays(x, x.bays.slice(0, baysNeeded(onHand, x.cap))),
-      onHand,
-      reserved: x.reserved - Math.min(qty, x.reserved), // dispatch fulfils bookings first
-      movements: logMovement(x, { text: "Dispatched · confirmed by J. Lim", d: `−${qty}` }),
-    }));
-    toast(`Dispatched ${qty} × ${r.model} · ${r.variant}`, { description: `${onHand} left on hand` });
+    setWare({ query: "", receiveOpen: false });
+    toast.success(`${input.model} · ${input.variant}`, { description: `${input.onHand} units placed` });
+    // The snapshot arrives a moment later; focus the new model when it does.
+    const t = setInterval(() => {
+      const sku = getInventory().byCode.get(code);
+      if (sku) {
+        clearInterval(t);
+        selectSku(sku);
+      }
+    }, 150);
+    setTimeout(() => clearInterval(t), 4000);
     return { ok: true };
+  } catch (e) {
+    return { ok: false, error: errorText(e) };
   }
-
-  const onHand = r.onHand + qty;
-  const extra = baysNeeded(onHand, r.cap) - r.bays.length;
-  const added = extra > 0 ? planBays(st.skus, r.category, extra, { floor: r.floor, zone: r.zone }) : [];
-  if (added.length < extra) return { ok: false, error: `No free bay for ${qty} more units (${added.length} of ${extra} bays free).` };
-  updateRecord(code, (x) => ({
-    ...withBays(x, [...x.bays, ...added]),
-    onHand,
-    incoming: x.incoming - Math.min(qty, x.incoming), // receiving fulfils open orders first
-    movements: logMovement(x, { text: "Received · count confirmed by J. Lim", d: `+${qty}` }),
-  }));
-  toast.success(`Received ${qty} × ${r.model} · ${r.variant}`, { description: `${onHand} on hand` });
-  return { ok: true };
 }
 
-/** Out of stock: the SKU, its icon and its 3D units leave the map and the list; its bays become free. */
-function removeOutOfStock(r: SkuRecord) {
-  const st = getWare();
-  const wasSelected = st.selected === r.sku;
-  setWare((s) => ({
-    skus: s.skus.filter((x) => x.sku !== r.sku),
-    ...(wasSelected ? { selected: null, panelOpen: false } : {}),
-    hoverBay: null,
-  }));
-  toast(`${r.model} · ${r.variant} is out of stock`, {
-    description: `Removed from the list and the map · ${r.bays.length} ${r.bays.length === 1 ? "bay" : "bays"} freed`,
-  });
+/** Owner: restore the synthetic demo ledger. */
+export async function resetDemo() {
+  await run(convex.mutation(api.seed.reset, { actor: actorNow() }), "Demo data reset");
+  setWare({ selected: null, zone: null, hoverBay: null, panelOpen: false, detail: null });
 }

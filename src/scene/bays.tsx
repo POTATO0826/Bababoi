@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import { selectSku, zoomZone } from "@/actions";
 import { Swatch } from "@/components/common";
 import { dragState, setPointing } from "@/interaction";
-import { PENDING_NOTE, available, isLow, skuTitle, type FloorId, type ZoneId } from "@/data/catalog";
+import { available, isLow, skuTitle, type FloorId, type ZoneId } from "@/data/catalog";
+import { useInbound } from "@/ledger";
 import type { Bay } from "@/data/inventory";
 import { ZONE_IDS, ZONES } from "@/data/layout";
 import { cn } from "@/lib/utils";
@@ -183,7 +184,8 @@ function HoverTip({ floor }: { floor: FloorId }) {
   const hoverId = useWare((s) => s.hoverBay);
   const threshold = useWare((s) => s.settings.lowStockThreshold);
   const bay = useInventory().bays[floor].find((b) => b.id === hoverId);
-  const pending = hoverId === "pending";
+  const inbound = useInbound();
+  const pending = hoverId === "pending" && !!inbound;
   if (!bay?.sku && !pending) return null;
 
   const [x0, z0, x1, z1] = pending ? PENDING_RECT : bay!.rect;
@@ -194,11 +196,11 @@ function HoverTip({ floor }: { floor: FloorId }) {
       <div className="min-w-[180px] -translate-x-1/2 -translate-y-full animate-fade-up rounded-md border border-border-strong bg-panel px-2.5 py-2 whitespace-nowrap text-foreground shadow-[0_8px_24px_rgba(0,0,0,.5)]" style={{ marginTop: -10 }}>
         {pending ? (
           <>
-            <div className="text-[12.5px] font-semibold">Delivery note {PENDING_NOTE.id}</div>
+            <div className="text-[12.5px] font-semibold">{inbound!.receipt.docRef ?? inbound!.receipt.code}</div>
             <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">
-              {PENDING_NOTE.qty} × {PENDING_NOTE.sku} · inbound dock
+              {inbound!.receipt.lines.map((l) => `${l.qty ?? "?"} × ${l.skuCode ?? l.rawText}`).join(" · ")}
             </div>
-            <div className="mt-[5px] text-[11.5px] font-medium text-warn">Awaiting verification · not on hand</div>
+            <div className="mt-[5px] text-[11.5px] font-medium text-warn">Not on hand yet</div>
           </>
         ) : (
           (() => {
@@ -245,6 +247,7 @@ function PendingHit() {
 }
 
 export function BaysLayer({ floor }: { floor: FloorId }) {
+  const inbound = useInbound();
   const showEmpty = useWare((s) => s.settings.showEmptyBays);
   const all = useInventory().bays[floor];
   const bays = all.filter((b) => showEmpty || b.sku);
@@ -259,7 +262,7 @@ export function BaysLayer({ floor }: { floor: FloorId }) {
       {all.map((b) => (
         <BayHit key={b.id} bay={b} height={bayHeight(b)} />
       ))}
-      {floor === 1 && <PendingHit />}
+      {floor === 1 && inbound && <PendingHit />}
       <HoverTip floor={floor} />
     </group>
   );

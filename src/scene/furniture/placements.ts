@@ -1,5 +1,5 @@
 // Packs each bay's units into the bay rect. Every placement is one instance of a template.
-import { PENDING_NOTE, type FloorId, type FurnitureKind } from "@/data/catalog";
+import type { FloorId, FurnitureKind } from "@/data/catalog";
 import type { Bay } from "@/data/inventory";
 import { AREAS } from "@/data/layout";
 import type { TemplateId } from "./templates";
@@ -140,13 +140,13 @@ function placeBay(bay: Bay): Placement[] {
   return out;
 }
 
-/** The pending supplier note DN-2291: wrapped units waiting in the inbound dock, not yet on hand. */
-function pendingDelivery(): Placement[] {
+/** A delivery awaiting verification: wrapped units in the inbound dock, not yet on hand. */
+function pendingDelivery(qty: number): Placement[] {
   const [x0, , x1] = AREAS.inbound;
   const mid = (x0 + x1) / 2;
-  return Array.from({ length: PENDING_NOTE.qty }, (_, i) => ({
+  return Array.from({ length: qty }, (_, i) => ({
     tpl: "wrapped" as const,
-    x: mid + (i - (PENDING_NOTE.qty - 1) / 2) * 3.0,
+    x: mid + (i - (qty - 1) / 2) * 3.0,
     y: 0,
     z: 4.1 + (i % 2) * 0.25,
     ry: (hash("pending", i) - 0.5) * 0.08,
@@ -156,12 +156,12 @@ function pendingDelivery(): Placement[] {
 }
 
 export const PENDING_RECT = (() => {
-  const xs = pendingDelivery().map((p) => p.x);
+  const xs = pendingDelivery(4).map((p) => p.x);
   return [Math.min(...xs) - 1.6, 3.3, Math.max(...xs) + 1.6, 5.2] as const;
 })();
 
-export function placementsFor(floor: FloorId, bays: readonly Bay[]): Placement[] {
+export function placementsFor(floor: FloorId, bays: readonly Bay[], inboundQty = 0): Placement[] {
   const out = bays.filter((b) => b.sku && b.qty > 0).flatMap(placeBay);
-  if (floor === 1) out.push(...pendingDelivery());
+  if (floor === 1 && inboundQty > 0) out.push(...pendingDelivery(inboundQty));
   return out;
 }

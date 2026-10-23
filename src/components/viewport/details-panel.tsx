@@ -1,11 +1,10 @@
-import { MinusIcon, PlusIcon, ScanLineIcon, XIcon } from "lucide-react";
-import { useState } from "react";
-import { clearSelection, recordMovement, selectSku } from "@/actions";
+import { ScanLineIcon, XIcon } from "lucide-react";
+import { clearSelection, selectSku } from "@/actions";
 import { CardHeading, Kicker, StatTiles, Swatch } from "@/components/common";
 import { SkuThumb } from "@/components/sku-thumb";
 import { Button } from "@/components/ui/button";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { PENDING_NOTE, available, historyFor, isLow, skuTitle, totals, type Sku } from "@/data/catalog";
+import { available, historyFor, isLow, skuTitle, totals, type Sku } from "@/data/catalog";
+import { useInbound } from "@/ledger";
 import { cn } from "@/lib/utils";
 import { setWare, useInventory, useWare } from "@/store";
 
@@ -52,7 +51,7 @@ function FloorSummary() {
   const list = inv.skusOnFloor(floor);
   const t = totals(list);
   const lows = list.filter((s) => isLow(s, threshold));
-  const pending = inv.byCode.get(PENDING_NOTE.sku);
+  const inbound = useInbound();
 
   return (
     <PanelShell
@@ -82,22 +81,24 @@ function FloorSummary() {
         ))}
         {!lows.length && <div className="border-t border-border py-2 text-xs text-faint">Nothing below the threshold.</div>}
       </div>
-      <div className="mt-4">
-        <Kicker className="mb-2 block">Awaiting verification</Kicker>
-        <button
-          onClick={() => pending && selectSku(pending)}
-          className="flex w-full items-center gap-2.5 rounded-md border border-warn/30 bg-warn/6 px-2.5 py-[9px] text-left transition-colors hover:bg-warn/10"
-        >
-          <ScanLineIcon className="size-4 flex-none text-warn" />
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className="text-xs">Delivery note {PENDING_NOTE.id}</span>
-            <span className="truncate font-mono text-[10.5px] text-muted-foreground">
-              {PENDING_NOTE.qty} × {PENDING_NOTE.sku} · not yet on hand
+      {inbound && (
+        <div className="mt-4">
+          <Kicker className="mb-2 block">Awaiting verification</Kicker>
+          <button
+            onClick={() => setWare({ stage: "receive", detail: { kind: "receipt", id: inbound.receipt._id }, panelOpen: false })}
+            className="flex w-full items-center gap-2.5 rounded-md border border-warn/30 bg-warn/6 px-2.5 py-[9px] text-left transition-colors hover:bg-warn/10"
+          >
+            <ScanLineIcon className="size-4 flex-none text-warn" />
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="text-xs">{inbound.receipt.docRef ?? inbound.receipt.code}</span>
+              <span className="truncate font-mono text-[10.5px] text-muted-foreground">
+                {inbound.receipt.lines.map((l) => `${l.qty ?? "?"} × ${l.skuCode ?? l.rawText}`).join(" · ")}
+              </span>
             </span>
-          </span>
-          <span className="text-[11px] font-semibold text-warn">Pending</span>
-        </button>
-      </div>
+            <span className="text-[11px] font-semibold text-warn">Pending</span>
+          </button>
+        </div>
+      )}
     </PanelShell>
   );
 }
@@ -137,7 +138,6 @@ function SelectedModel({ sku: s }: { sku: Sku }) {
           ))}
         </div>
       </div>
-      <StockMovement key={s.sku} sku={s} />
       <div className="mt-4">
         <Kicker className="mb-1 block">History</Kicker>
         {historyFor(s).map((h) => (
@@ -150,92 +150,6 @@ function SelectedModel({ sku: s }: { sku: Sku }) {
           </div>
         ))}
       </div>
-      <Button variant="outline" className="mt-3.5 h-[34px] w-full bg-transparent text-[12.5px] shadow-none dark:bg-transparent">
-        View stock movements
-      </Button>
     </PanelShell>
-  );
-}
-
-/** Record stock leaving (dispatch) or arriving (receive). A person confirms; reaching 0 removes the model. */
-function StockMovement({ sku: s }: { sku: Sku }) {
-  const [type, setType] = useState<"dispatch" | "receive">("dispatch");
-  const [qty, setQty] = useState(1);
-  const [confirming, setConfirming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const max = type === "dispatch" ? s.onHand : 99;
-  const n = Math.min(Math.max(1, qty), Math.max(1, max));
-  const emptiesStock = type === "dispatch" && n >= s.onHand;
-
-  const confirm = () => {
-    const res = recordMovement(s.sku, type, n);
-    if (res.ok) {
-      setConfirming(false);
-      setQty(1);
-      setError(null);
-    } else setError(res.error);
-  };
-
-  return (
-    <div className="mt-4">
-      <div className="mb-2 flex items-center justify-between">
-        <Kicker>Record movement</Kicker>
-        <ToggleGroup
-          type="single"
-          value={type}
-          onValueChange={(v) => {
-            if (!v) return;
-            setType(v as "dispatch" | "receive");
-            setConfirming(false);
-            setError(null);
-          }}
-          spacing={0.5}
-          className="rounded-[7px] border border-border bg-inset p-[3px]"
-          aria-label="Movement type"
-        >
-          <ToggleGroupItem value="dispatch" variant="segment" size="segment">
-            Dispatch
-          </ToggleGroupItem>
-          <ToggleGroupItem value="receive" variant="segment" size="segment">
-            Receive
-          </ToggleGroupItem>
-        </ToggleGroup>
-      </div>
-      <div className="flex items-center gap-2">
-        <div className="flex h-8 items-center rounded-md border border-border bg-inset-2">
-          <Button variant="quiet" size="icon-sm" className="size-8" aria-label="Fewer" onClick={() => setQty(Math.max(1, n - 1))} disabled={n <= 1}>
-            <MinusIcon />
-          </Button>
-          <span className="w-8 text-center font-mono text-[13px] tabular-nums" aria-live="polite">
-            {n}
-          </span>
-          <Button variant="quiet" size="icon-sm" className="size-8" aria-label="More" onClick={() => setQty(Math.min(max, n + 1))} disabled={n >= max}>
-            <PlusIcon />
-          </Button>
-        </div>
-        {confirming ? (
-          <Button
-            onClick={confirm}
-            className={cn("h-8 flex-1 text-[12.5px]", emptiesStock && "bg-warn text-background hover:bg-warn/90")}
-          >
-            Confirm {type === "dispatch" ? `−${n}` : `+${n}`}
-          </Button>
-        ) : (
-          <Button variant="outline" onClick={() => setConfirming(true)} className="h-8 flex-1 bg-transparent text-[12.5px] shadow-none dark:bg-transparent">
-            {type === "dispatch" ? "Dispatch" : "Receive"} {n} {n === 1 ? "unit" : "units"}
-          </Button>
-        )}
-      </div>
-      {confirming && (
-        <p className={cn("mt-1.5 text-[11.5px]", emptiesStock ? "text-warn" : "text-faint")}>
-          {emptiesStock
-            ? "This empties the stock: the model and its icon are removed from the list and the map."
-            : type === "dispatch"
-              ? `${s.onHand - n} will remain on hand.`
-              : `${s.onHand + n} on hand after receiving. Extra bays are taken from free space if needed.`}
-        </p>
-      )}
-      {error && <p className="mt-1.5 text-[11.5px] text-destructive">{error}</p>}
-    </div>
   );
 }

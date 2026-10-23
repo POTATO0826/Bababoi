@@ -55,7 +55,6 @@ function ReceiveForm() {
   const [number] = useState(randomCode);
   const [skuEdited, setSkuEdited] = useState<string | null>(null);
   const [onHand, setOnHand] = useState("4");
-  const [incoming, setIncoming] = useState("0");
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const existing = useWare((s) => s.skus);
@@ -81,11 +80,11 @@ function ReceiveForm() {
   };
   const invalid = Object.values(errors).some(Boolean);
 
-  const submit = (e: FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
     setSubmitted(true);
     if (invalid) return;
-    const res = receiveNewModel({
+    const res = await receiveNewModel({
       category,
       shape,
       model,
@@ -93,7 +92,7 @@ function ReceiveForm() {
       color,
       sku,
       onHand: units,
-      incoming: Math.max(0, Math.floor(Number(incoming) || 0)),
+      incoming: 0,
     });
     if (!res.ok) setError(res.error);
   };
@@ -103,9 +102,7 @@ function ReceiveForm() {
     <form onSubmit={submit} className="flex flex-col gap-5">
       <DialogHeader>
         <DialogTitle>Receive new model</DialogTitle>
-        <DialogDescription>
-          The model is placed in free bays and drawn on the map. Claude then generates its icon. It’s removed automatically when it runs out of stock.
-        </DialogDescription>
+        <DialogDescription>Counted units go straight into free bays.</DialogDescription>
       </DialogHeader>
 
       <FieldGroup>
@@ -197,16 +194,10 @@ function ReceiveForm() {
           </Field>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Field data-invalid={!!show("units") || undefined}>
-            <FieldLabel htmlFor="rc-onhand">Units received</FieldLabel>
-            <Input id="rc-onhand" type="number" min={1} value={onHand} onChange={(e) => setOnHand(e.target.value)} className="font-mono" aria-invalid={!!show("units")} />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="rc-incoming">Still incoming</FieldLabel>
-            <Input id="rc-incoming" type="number" min={0} value={incoming} onChange={(e) => setIncoming(e.target.value)} className="font-mono" />
-          </Field>
-        </div>
+        <Field data-invalid={!!show("units") || undefined}>
+          <FieldLabel htmlFor="rc-onhand">Units counted</FieldLabel>
+          <Input id="rc-onhand" type="number" min={1} value={onHand} onChange={(e) => setOnHand(e.target.value)} className="font-mono" aria-invalid={!!show("units")} />
+        </Field>
 
         <div
           className={cn(
