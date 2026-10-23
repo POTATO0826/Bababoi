@@ -7,7 +7,8 @@ import type { Actor, Role } from "@/domain/types";
 
 export type ViewMode = "iso" | "top";
 export type OrbState = "idle" | "listening" | "thinking" | "speaking";
-export type Stage = "inventory" | "receive" | "ageing" | "deals" | "replenish";
+/** What the left column shows. "inventory" is the default; the rest open from the command palette or Jarvis. */
+export type Stage = "inventory" | "receive" | "ageing" | "deals" | "delivery" | "approve" | "collect" | "replenish";
 export type Lang = "auto" | "en" | "zh";
 export type Snapshot = NonNullable<FunctionReturnType<typeof api.ledger.snapshot>>;
 export type Detail = { kind: "deal" | "receipt" | "batch"; id: string } | null;
@@ -36,6 +37,7 @@ export interface WareState {
   role: Role;
   stage: Stage;
   detail: Detail;
+  paletteOpen: boolean;
   lang: Lang;
 
   floor: FloorId;
@@ -108,6 +110,7 @@ export const useWare = create<WareState>()(() => ({
   role: readRole(),
   stage: "inventory",
   detail: null,
+  paletteOpen: false,
   lang: "auto",
 
   floor: 1,

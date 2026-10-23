@@ -15,6 +15,7 @@ import {
   type ZoneId,
 } from "@/data/catalog";
 import { baysNeeded, planBays, slotLabel } from "@/data/inventory";
+import { SLOT_BY_ID } from "@/data/layout";
 import { actorNow, getInventory, getWare, setWare, type ViewMode } from "@/store";
 
 const timers = new Set<ReturnType<typeof setTimeout>>();
@@ -94,6 +95,16 @@ export function selectSku(s: Sku) {
     focusSku(s);
     speak(`${s.model.name} ${s.variant} (${s.sku}): ${s.onHand} on hand, ${s.reserved} reserved, ${available(s)} available.`);
   });
+}
+
+/** Fly the map to a SKU (optionally a specific bay's floor) without opening the Details popup or speaking. */
+export function showOnMap(code: string, slot?: string) {
+  const sku = getInventory().byCode.get(code);
+  if (!sku) return;
+  const at = slot ? SLOT_BY_ID.get(slot) : undefined;
+  switchFloor(at?.floor ?? sku.floor, () =>
+    setWare({ selected: sku.sku, zone: at?.zone ?? sku.zone, zoomMul: 1, openCat: sku.category.id, hoverBay: null, panelOpen: false }),
+  );
 }
 
 /** Click a category row: expand it and zoom to its first SKU's zone, or collapse it. */

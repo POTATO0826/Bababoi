@@ -1,6 +1,7 @@
 import { Header } from "@/components/header";
 import { LedgerSync } from "@/components/ledger-sync";
-import { InventoryColumn } from "@/components/inventory/inventory-column";
+import { CommandPalette } from "@/components/command-palette";
+import { StageColumn } from "@/components/stages/stage-column";
 import { ReceiveDialog } from "@/components/inventory/receive-dialog";
 import { JarvisSession } from "@/components/jarvis/jarvis-session";
 import { Viewport } from "@/components/viewport/viewport";
@@ -34,7 +35,7 @@ export function App() {
           className="grid min-h-0 gap-3 p-3"
           style={{ gridTemplateColumns: cols.base + (agentOpen && !drawer ? cols.agent : "") }}
         >
-          <InventoryColumn
+          <StageColumn
             wide={tier === "wide"}
             className={cn(tier === "narrow" && "h-[min(560px,calc(100vh-76px))]", tier === "stacked" && "order-2 max-h-[80vh]")}
           />
@@ -48,6 +49,7 @@ export function App() {
         </div>
       </div>
       <ReceiveDialog />
+      <CommandPalette />
       <Toaster position="bottom-right" theme="dark" />
     </TooltipProvider>
   );

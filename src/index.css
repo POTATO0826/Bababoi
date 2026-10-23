@@ -45,6 +45,10 @@
   --warn: #e3bd78;
   --ok: #22c55e;
   --ok-light: #4ade80;
+  /* Workflow states on the map and in lists */
+  --ageing: #a78bfa;
+  --reserved: #2dd4bf;
+  --dispatch: #f97316;
 }
 
 @theme inline {
@@ -88,6 +92,9 @@
   --color-warn: var(--warn);
   --color-ok: var(--ok);
   --color-ok-light: var(--ok-light);
+  --color-ageing: var(--ageing);
+  --color-reserved: var(--reserved);
+  --color-dispatch: var(--dispatch);
 
   --radius-sm: 4px;
   --radius-md: 6px;

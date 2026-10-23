@@ -1,5 +1,6 @@
 // Receiving: evidence (photo / document / voice) → draft lines → warehouse verifies → stock posted into bays.
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import { internalMutation, internalQuery, mutation, query, type MutationCtx } from "./_generated/server";
 import { actor, furnitureKind, receiptLine } from "./schema";
 import { activeBatches, audit, fail, nextCode, requireRole, skuByCode } from "./lib";
@@ -63,6 +64,21 @@ export const addEvidence = mutation({
         { kind, at: Date.now(), ...(storageId ? { storageId } : {}), ...(text ? { text: text.slice(0, 4000) } : {}), ...(mime ? { mime } : {}) },
       ],
     });
+    return null;
+  },
+});
+
+/** Ask Claude to draft lines from the evidence. Runs in the background; status shows on the receipt. */
+export const requestExtraction = mutation({
+  args: { actor, receiptId: v.id("receipts") },
+  handler: async (ctx, { actor, receiptId }) => {
+    const r = (await ctx.db.get("receipts", receiptId)) ?? fail("Receipt not found");
+    if (r.status !== "needs_review") fail("Receipt is closed");
+    if (r.extraction.status === "running") return null;
+    if (!r.evidence.length) fail("Add a photo, document or voice note first");
+    await ctx.db.patch("receipts", receiptId, { extraction: { status: "running", at: Date.now() } });
+    await ctx.scheduler.runAfter(0, internal.ai.extractReceipt, { receiptId });
+    await audit(ctx, actor, "extract", `receipt:${receiptId}`, "AI reading requested");
     return null;
   },
 });
@@ -241,6 +257,7 @@ export const createModel = mutation({
       actor: a.actor,
       synthetic: false,
     });
+    await ctx.scheduler.runAfter(0, internal.ai.generateIcon, { code });
     await audit(ctx, a.actor, "new_model", `sku:${code}`, `${a.units} × ${code} → ${locations.map((l) => slotCode(l.slot)).join(", ")} (${home.name})`);
     return code;
   },
@@ -278,6 +295,10 @@ export const setExtraction = internalMutation({
   handler: async (ctx, a) => {
     const r = await ctx.db.get("receipts", a.receiptId);
     if (!r || r.status !== "needs_review") return null;
+    if (a.status === "error") {
+      await ctx.db.patch("receipts", a.receiptId, { extraction: { status: "error", at: Date.now(), ...(a.error ? { error: a.error } : {}) } });
+      return null;
+    }
     const known = new Set((await ctx.db.query("skus").take(500)).map((s) => s.code));
     const lines = a.lines?.map((l) => ({
       ...l,

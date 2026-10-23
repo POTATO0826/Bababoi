@@ -1,6 +1,7 @@
 import { ArrowLeftIcon, ChevronDownIcon, ChevronRightIcon, PanelRightIcon, ScanIcon } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { backToOverview, escapeZone, resetCamera, setView, switchFloor } from "@/actions";
+import { DetailHost } from "@/components/detail/detail-host";
 import { DetailsPanel } from "@/components/viewport/details-panel";
 import { dragState } from "@/interaction";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ import { totals, type FloorId } from "@/data/catalog";
 import { useElementSize } from "@/hooks/use-layout";
 import { cn } from "@/lib/utils";
 import { getWare, setWare, useInventory, useWare, type ViewMode } from "@/store";
+import { useBayOverlay } from "@/workflow";
 
 const WarehouseCanvas = lazy(() => import("@/scene/warehouse-canvas"));
 
@@ -20,6 +22,7 @@ export function Viewport({ className }: { className?: string }) {
   const veryTight = width > 0 && width < 560;
   const zone = useWare((s) => s.zone);
   const panelOpen = useWare((s) => s.panelOpen);
+  const detail = useWare((s) => s.detail);
   const fading = useWare((s) => s.fading);
   const dragging = useWare((s) => s.dragging);
   const drag = useRef<{ x: number; theta: number; moved: boolean; id: number } | null>(null);
@@ -96,7 +99,8 @@ export function Viewport({ className }: { className?: string }) {
       <Hud tight={tight} veryTight={veryTight} />
       {(width === 0 || width >= 520) && <Legend showStats={width >= 700 && !zone} />}
 
-      {panelOpen && <DetailsPanel veryTight={veryTight} />}
+      {panelOpen && !detail && <DetailsPanel veryTight={veryTight} />}
+      <DetailHost veryTight={veryTight} />
 
       {zone && (
         <Button
@@ -250,10 +254,15 @@ function Legend({ showStats }: { showStats: boolean }) {
   const bays = inv.bays[floor];
   const occupied = bays.filter((b) => b.sku).length;
   const units = totals(inv.skusOnFloor(floor)).onHand;
+  const overlay = useBayOverlay();
+  const onFloor = new Set([...overlay].filter(([id]) => bays.some((b) => b.id === id)).map(([, st]) => st));
   const items: [string, string][] = [
     ["In stock", "bg-[#3a3a42]"],
     ["Low stock", "bg-warn"],
     ["Selected", "bg-brand"],
+    ...(onFloor.has("ageing") ? ([["Ageing", "bg-ageing"]] as [string, string][]) : []),
+    ...(onFloor.has("reserved") ? ([["Reserved", "bg-reserved"]] as [string, string][]) : []),
+    ...(onFloor.has("freed") ? ([["Freed", "bg-ok"]] as [string, string][]) : []),
   ];
   return (
     <div className="pointer-events-none absolute bottom-3 left-3 flex h-7 items-center gap-3.5 rounded-md border border-border bg-panel px-3 text-[11.5px] whitespace-nowrap text-muted-foreground">

@@ -10,6 +10,8 @@ const TOP_EL = Math.PI / 2;
 const DIST = 300;
 /** Width of the Details popup + its margins, kept clear when framing. */
 const PANEL_W = 344;
+/** Workflow popup (deal / receipt / batch) + margins. */
+const DETAIL_W = 424;
 /** Jarvis drawer (fixed, under 980px wide) overlapping the viewport. */
 const DRAWER_W = 352;
 /** The racked area (zones A–D). The overview frames this rather than the bare slab, so the empty corners crop off. */
@@ -75,7 +77,7 @@ export function CameraRig() {
 
     // Keep clear whatever covers the right of the viewport: the Details popup, or the Jarvis drawer (<980px).
     const drawer = s.agentOpen && window.innerWidth < 980 ? DRAWER_W : 0;
-    const panel = s.panelOpen && size.width > 720 ? PANEL_W : 0;
+    const panel = size.width > 720 ? (s.detail ? DETAIL_W : s.panelOpen ? PANEL_W : 0) : 0;
     const reserve = size.width - Math.max(drawer, panel) > 240 ? Math.max(drawer, panel) : 0;
     const availW = Math.max(120, size.width - reserve - 24);
     const availH = Math.max(120, size.height - 104);

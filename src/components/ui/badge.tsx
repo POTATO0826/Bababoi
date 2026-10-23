@@ -21,6 +21,14 @@ const badgeVariants = cva(
         warn: "bg-warn/14 text-warn",
         // WareOrb: neutral "Viewing" pill
         neutral: "bg-secondary text-text-2",
+        // WareOrb workflow states
+        ageing: "bg-ageing/14 text-ageing",
+        reserved: "bg-reserved/14 text-reserved",
+        dispatch: "bg-dispatch/14 text-dispatch",
+        ok: "bg-ok/14 text-ok-light",
+        brand: "bg-brand/14 text-brand-light",
+        // Provenance labels (sandbox, simulated, synthetic, demo)
+        tag: "border-border-strong text-muted-foreground",
       },
     },
     defaultVariants: {

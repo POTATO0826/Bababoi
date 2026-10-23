@@ -126,9 +126,7 @@ function CategoryRow({ category: c, first, wide }: { category: Category; first: 
     ? wide
       ? `${lowN} ${lowN === 1 ? "SKU" : "SKUs"} below threshold`
       : `${lowN} low stock`
-    : wide
-      ? "All counts verified 09:42"
-      : "Verified 09:42";
+    : "In stock";
 
   return (
     <div className={cn("transition-colors duration-200", !first && "border-t border-border", active && "bg-hover-row")}>

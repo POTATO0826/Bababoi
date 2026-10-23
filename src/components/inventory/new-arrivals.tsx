@@ -1,53 +1,25 @@
-import { PackagePlusIcon, SparklesIcon } from "lucide-react";
-import { resetDemo, selectSku } from "@/actions";
+import { SparklesIcon } from "lucide-react";
+import { selectSku } from "@/actions";
 import { CardHeading } from "@/components/common";
 import { SkuIconTile } from "@/components/sku-thumb";
-import { Button } from "@/components/ui/button";
 import { available, isLow, skuTitle, type Sku } from "@/data/catalog";
 import { cn } from "@/lib/utils";
-import { setWare, useInventory, useWare } from "@/store";
+import { useInventory, useWare } from "@/store";
 const timeLabel = (t: number) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 
 /** New furniture models received into free bays. A model leaves this list (and the map) when it runs out. */
 export function NewArrivals() {
   const inv = useInventory();
-  const role = useWare((s) => s.role);
-
+  if (!inv.newArrivals.length) return null;
   return (
     <section className="flex flex-none flex-col overflow-hidden rounded-xl border border-border bg-card">
       <div className="flex items-center justify-between gap-2 px-3.5 pt-3 pb-2.5">
-        <span className="flex items-center gap-2">
-          <CardHeading>New arrivals</CardHeading>
-          {inv.newArrivals.length > 0 && <span className="font-mono text-[11px] text-muted-foreground">{inv.newArrivals.length}</span>}
-        </span>
-        <span className="font-mono text-[11px] text-faint">{inv.freeBays} free bays</span>
+        <CardHeading>New arrivals</CardHeading>
+        <span className="font-mono text-[11px] text-muted-foreground">{inv.newArrivals.length}</span>
       </div>
-
-      {inv.newArrivals.length === 0 ? (
-        <p className="border-t border-border-inner px-3.5 py-3 text-[12.5px] text-faint">
-          No new models yet.
-        </p>
-      ) : (
-        inv.newArrivals.map((s) => <ArrivalRow key={s.sku} sku={s} />)
-      )}
-
-      <div className="flex items-center gap-2 border-t border-border-inner p-2.5">
-        <Button
-          variant="outline"
-          onClick={() => setWare({ receiveOpen: true })}
-          disabled={inv.freeBays === 0 || role !== "warehouse"}
-          title={role !== "warehouse" ? "Warehouse only" : undefined}
-          className="h-8 flex-1 bg-transparent text-[12.5px] shadow-none dark:bg-transparent"
-        >
-          <PackagePlusIcon data-icon="inline-start" />
-          Receive new model
-        </Button>
-        {role === "owner" && (
-          <Button variant="quiet" size="sm" onClick={() => void resetDemo()} className="h-8 text-[12px]">
-            Reset demo
-          </Button>
-        )}
-      </div>
+      {inv.newArrivals.map((s) => (
+        <ArrivalRow key={s.sku} sku={s} />
+      ))}
     </section>
   );
 }

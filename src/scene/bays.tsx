@@ -6,6 +6,8 @@ import { Swatch } from "@/components/common";
 import { dragState, setPointing } from "@/interaction";
 import { available, isLow, skuTitle, type FloorId, type ZoneId } from "@/data/catalog";
 import { useInbound } from "@/ledger";
+import { DAY } from "@/domain/types";
+import { useBayOverlay, type BayState } from "@/workflow";
 import type { Bay } from "@/data/inventory";
 import { ZONE_IDS, ZONES } from "@/data/layout";
 import { cn } from "@/lib/utils";
@@ -75,7 +77,9 @@ function Zone({ id }: { id: ZoneId }) {
 
 const PAD = 0.3;
 
-function padStyle(bay: Bay, selected: string | null, hover: string | null, threshold: number) {
+const STATE_COLOR: Record<BayState, string> = { ageing: "#a78bfa", reserved: "#2dd4bf", freed: "#22c55e" };
+
+function padStyle(bay: Bay, selected: string | null, hover: string | null, threshold: number, state?: BayState) {
   const s = bay.sku;
   let fill = "#ffffff";
   let fillOpacity = 0.035;
@@ -86,6 +90,15 @@ function padStyle(bay: Bay, selected: string | null, hover: string | null, thres
     fillOpacity = 0.012;
     stroke = "#3f3f46";
     dashed = true;
+    if (state === "freed") {
+      fill = stroke = STATE_COLOR.freed;
+      fillOpacity = 0.08;
+      width = 1.4;
+    }
+  } else if (state === "reserved" || state === "ageing") {
+    fill = stroke = STATE_COLOR[state];
+    fillOpacity = state === "reserved" ? 0.24 : 0.2;
+    width = selected === s.sku ? 2.2 : 1.5;
   } else if (selected === s.sku) {
     fill = "#4f8bea";
     fillOpacity = 0.3;
@@ -104,11 +117,11 @@ function padStyle(bay: Bay, selected: string | null, hover: string | null, thres
   return { fill, fillOpacity, stroke, width, dashed };
 }
 
-function BayPad({ bay }: { bay: Bay }) {
+function BayPad({ bay, state }: { bay: Bay; state?: BayState }) {
   const selected = useWare((s) => s.selected);
   const hover = useWare((s) => s.hoverBay);
   const threshold = useWare((s) => s.settings.lowStockThreshold);
-  const st = padStyle(bay, selected, hover, threshold);
+  const st = padStyle(bay, selected, hover, threshold, state);
   const [x0, z0, x1, z1] = bay.rect;
   const points = useMemo(() => rectLoop([x0 - PAD, z0 - PAD, x1 + PAD, z1 + PAD], 0.035), [x0, z0, x1, z1]);
   return (
@@ -185,6 +198,8 @@ function HoverTip({ floor }: { floor: FloorId }) {
   const threshold = useWare((s) => s.settings.lowStockThreshold);
   const bay = useInventory().bays[floor].find((b) => b.id === hoverId);
   const inbound = useInbound();
+  const batch = useWare((s) => (bay?.batchId ? s.ledger?.batches.find((b) => b._id === bay.batchId) : undefined));
+  const state = useBayOverlay().get(hoverId ?? "");
   const pending = hoverId === "pending" && !!inbound;
   if (!bay?.sku && !pending) return null;
 
@@ -220,6 +235,14 @@ function HoverTip({ floor }: { floor: FloorId }) {
                   <span className="text-disabled">·</span>
                   <span className={cn("font-medium", low ? "text-warn" : "text-brand-light")}>{available(s)} available</span>
                 </div>
+                {batch && (
+                  <div className="mt-0.5 flex gap-1.5 font-mono text-[11px] text-muted-foreground">
+                    <span>{batch.code}</span>
+                    <span className="text-disabled">·</span>
+                    <span className={cn(state === "ageing" && "text-ageing")}>{Math.floor((Date.now() - batch.receivedAt) / DAY)}d</span>
+                    {state === "reserved" && <span className="text-reserved">· reserved</span>}
+                  </div>
+                )}
               </>
             );
           })()
@@ -248,16 +271,17 @@ function PendingHit() {
 
 export function BaysLayer({ floor }: { floor: FloorId }) {
   const inbound = useInbound();
+  const overlay = useBayOverlay();
   const showEmpty = useWare((s) => s.settings.showEmptyBays);
   const all = useInventory().bays[floor];
-  const bays = all.filter((b) => showEmpty || b.sku);
+  const bays = all.filter((b) => showEmpty || b.sku || overlay.has(b.id));
   return (
     <group>
       {ZONE_IDS.map((z) => (
         <Zone key={z} id={z} />
       ))}
       {bays.map((b) => (
-        <BayPad key={b.id} bay={b} />
+        <BayPad key={b.id} bay={b} state={overlay.get(b.id)} />
       ))}
       {all.map((b) => (
         <BayHit key={b.id} bay={b} height={bayHeight(b)} />

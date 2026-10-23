@@ -8,6 +8,8 @@
  * @module
  */
 
+import type * as ai from "../ai.js";
+import type * as aiData from "../aiData.js";
 import type * as deals from "../deals.js";
 import type * as lalamove from "../lalamove.js";
 import type * as ledger from "../ledger.js";
@@ -25,6 +27,8 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  ai: typeof ai;
+  aiData: typeof aiData;
   deals: typeof deals;
   lalamove: typeof lalamove;
   ledger: typeof ledger;
