@@ -483,7 +483,8 @@ function QuoteRow({
   const st = quoteState(q, deal, now);
   const left = q.expiresAt ? Math.max(0, Math.floor((q.expiresAt - now) / 1000)) : null;
   const c = q.status === "ok" ? comparable(q, deal) : null;
-  const needsUnloading = deal.unloading === "requested" && q.status === "ok" && q.unloading === "unknown" && st === "current";
+  const open = ["offer_ready", "pending_approval", "rejected"].includes(deal.status);
+  const needsUnloading = open && deal.unloading === "requested" && q.status === "ok" && q.unloading === "unknown" && st === "current";
 
   return (
     <div
