@@ -5,7 +5,7 @@ Spec: `AdvancedWareorb.md` (9-stage workflow). Plan: minimized build, deadline <
 
 ## Rules for whoever continues
 - Read `convex/_generated/ai/guidelines.md` before touching `convex/` (Convex 1.48: `ctx.db.get("table", id)`, `ctx.db.patch("table", id, …)`, env via `env` from `./_generated/server`, bounded `.take()`).
-- UI: shadcn components, minimal copy (short badges), keep the 3D map. **No tabs** — workflow panels open from the command palette (`/` or Ctrl+K) or Jarvis; Esc returns to the map.
+- UI: shadcn components, minimal copy (short badges), keep the 3D map. **No tabs** — workflow panels open from the **Jarvis chat** (type `/` for the role's commands, ask in plain words, talk, or scan a delivery note). `/` or Ctrl+K opens Jarvis with `/` typed; Esc returns to the map. Jarvis is tuned per role (greeting from live counts, suggestions, Claude focus).
 - Pure rules live in `src/domain/*.ts` (relative imports only), shared by Convex + browser + `bun test`.
 - Simulated roles (Owner Mei / Sales Arif / Warehouse J. Lim) pass `actor` to every mutation; the server checks with `requireRole`.
 - Never: invent prices/coordinates, count unknown cost as 0, move stock at approval, call Lalamove `/v3/orders` (booking is simulated), let Jarvis approve/post/collect.
@@ -48,13 +48,13 @@ Spec: `AdvancedWareorb.md` (9-stage workflow). Plan: minimized build, deadline <
 - `http.ts` — `/voice/tts`, `/voice/asr` (Fish; 501 → browser fallback) · `limits.ts` — rate limiter · `replenish.ts` — `createPO` (owner) · `seed.ts` — `run`, `reset` (owner), `ensure`
 
 ## Frontend map (`src/`)
-- `commands.ts` + `components/command-palette.tsx` — slash commands per role
+- `commands.ts` — slash commands per role · `components/jarvis/jarvis-chat.tsx` — Jarvis chat (shadcn MessageScroller/Message/Bubble/InputGroup, orb beside it) · `roles.ts` — per-role greeting/suggestions · `scan.ts` — scan → receipt → AI reading
 - `components/stages/*` — left-column panels · `components/detail/*` — popups over the map (deal, receipt, batch)
 - `workflow.ts` — ageing flags, deal turns, map overlay, replenishment · `ledger.ts` — snapshot selectors
 - `voice/voice.ts` — record / transcribe / say · `actions.ts` — navigation + Jarvis loop
 
 ## §8 demo path (presenter script)
-1. Press `/` once so judges see the commands.
+1. Open Jarvis and type `/` once so judges see the role's commands; switch roles from the header.
 2. **Warehouse** (`J. Lim`): `/receive` → DN-2291 → tick *Counted* → **Post** (inbound dock clears, chairs land in a bay).
 3. **Owner** (`Mei`): say "有什么旧货？" or `/ageing` → B-2140-A (120 d, A-1-01/02 violet) → **Hand to Arif**.
 4. **Sales** (`Arif`): `/deals` → the sofa deal → buyer RM1,200 × 2, PJ preset → **Confirm location** → **Get Lalamove quotes** and/or **Demo** replies → pick RM280 → **Send to Mei**.
