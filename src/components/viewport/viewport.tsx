@@ -5,9 +5,10 @@ import { DetailsPanel } from "@/components/viewport/details-panel";
 import { dragState } from "@/interaction";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { skusOnFloor, totals, zoneCategory, type FloorId } from "@/data/catalog";
-import { BAYS } from "@/data/layout";
 import { useElementSize } from "@/hooks/use-layout";
+import { zoneLabel } from "@/lib/inventory";
+import { useInventory, useServerData } from "@/server-data";
+import type { FloorId } from "@/shared/contracts";
 import { cn } from "@/lib/utils";
 import { getWare, setWare, useWare, type ViewMode } from "@/store";
 
@@ -94,6 +95,7 @@ export function Viewport({ className }: { className?: string }) {
         </Suspense>
       </div>
 
+      <SceneStatus />
       <Hud tight={tight} veryTight={veryTight} />
       {(width === 0 || width >= 520) && <Legend showStats={width >= 700 && !zone} />}
 
@@ -127,12 +129,37 @@ function SceneLoading() {
   );
 }
 
+/** Over the empty building while there is no snapshot: never draws seed stock instead. */
+function SceneStatus() {
+  const status = useServerData((s) => s.status);
+  const auth = useServerData((s) => s.auth);
+  const error = useServerData((s) => s.error);
+  if (status === "ready") return null;
+  const text =
+    status === "error"
+      ? `Stock unavailable — ${error ?? "the ledger could not be read"}`
+      : auth === "anonymous"
+        ? "Choose a demo persona to load the warehouse"
+        : auth === "disabled"
+          ? "Sign-in is not configured on this server"
+          : "Loading stock…";
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-1/2 z-[3] flex -translate-y-1/2 justify-center">
+      <span className={cn("rounded-md border bg-panel px-3 py-2 text-[12.5px]", status === "error" ? "border-warn/40 text-warn" : "border-border text-muted-foreground")}>
+        {text}
+      </span>
+    </div>
+  );
+}
+
 function Hud({ tight, veryTight }: { tight: boolean; veryTight: boolean }) {
   const floor = useWare((s) => s.floor);
   const zone = useWare((s) => s.zone);
   const view = useWare((s) => s.view);
   const panelOpen = useWare((s) => s.panelOpen);
-  const zc = zone ? zoneCategory(floor, zone) : null;
+  const inv = useInventory();
+  // Zones are navigation regions; occupancy may be mixed after receipts.
+  const zc = zone && inv ? zoneLabel(inv, floor, zone) : null;
   const stop = (e: ReactPointerEvent) => e.stopPropagation();
 
   return (
@@ -170,7 +197,7 @@ function Hud({ tight, veryTight }: { tight: boolean; veryTight: boolean }) {
             <>
               <ChevronRightIcon className="size-3 flex-none text-disabled" />
               <span className="min-w-0 truncate font-medium text-foreground">
-                {zc ? `${zc.name} · Zone ${zone}` : `Zone ${zone}`}
+                {zc ? `${zc} · Zone ${zone}` : `Zone ${zone}`}
               </span>
             </>
           )}
@@ -246,9 +273,7 @@ function Segmented<T extends string | number>({
 
 function Legend({ showStats }: { showStats: boolean }) {
   const floor = useWare((s) => s.floor);
-  const bays = BAYS[floor];
-  const occupied = bays.filter((b) => b.sku).length;
-  const units = totals(skusOnFloor(floor)).onHand;
+  const ft = useInventory()?.floorTotals[floor];
   const items: [string, string][] = [
     ["In stock", "bg-[#3a3a42]"],
     ["Low stock", "bg-warn"],
@@ -266,11 +291,11 @@ function Legend({ showStats }: { showStats: boolean }) {
         <span className="size-2 rounded-[2px] border border-dashed border-disabled" />
         Empty bay
       </span>
-      {showStats && (
+      {showStats && ft && (
         <>
           <span className="h-3.5 w-px bg-border" />
           <span className="font-mono text-[11px] text-faint">
-            Floor {floor} · {occupied}/{bays.length} bays · {units} units · drag to orbit
+            Floor {floor} · {ft.occupied}/{ft.bays} bays · {ft.units} units · drag to orbit
           </span>
         </>
       )}

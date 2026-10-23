@@ -2,10 +2,10 @@ import { Line } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
-import type { FloorId } from "@/data/catalog";
+import type { FloorId } from "@/shared/contracts";
 import { AREAS, BAY_GAP, FLOOR_D, FLOOR_W, LIFT_H, LIFTS, RACK_ROWS, type Rect } from "@/data/layout";
 import { rig } from "./camera-rig";
-import { PENDING_RECT } from "./furniture/placements";
+import { pendingRect } from "./furniture/placements";
 
 const SLAB_H = 1.6;
 export const WALL_H = 3.4;
@@ -181,7 +181,7 @@ function Markings() {
 }
 
 /** Pending delivery footprint in the receiving dock (amber, awaiting verification). */
-function PendingMark() {
+function PendingMark({ rect }: { rect: Rect }) {
   const ref = useRef<THREE.Group>(null);
   useFrame(({ clock }) => {
     const g = ref.current;
@@ -194,7 +194,7 @@ function PendingMark() {
   });
   return (
     <group ref={ref}>
-      <DashedRect rect={PENDING_RECT} y={0.025} color="#e3bd78" width={1.2} />
+      <DashedRect rect={rect} y={0.025} color="#e3bd78" width={1.2} />
     </group>
   );
 }
@@ -396,12 +396,13 @@ function DockDoor({ x }: { x: number }) {
   );
 }
 
-export function Structure({ floor }: { floor: FloorId }) {
+export function Structure({ floor, pendingUnits }: { floor: FloorId; pendingUnits: number }) {
+  const pending = floor === 1 ? pendingRect(pendingUnits) : null;
   return (
     <group>
       <Slab />
       <Markings />
-      {floor === 1 && <PendingMark />}
+      {pending && <PendingMark key={pending.join(",")} rect={pending} />}
       <Racks />
       {LIFTS.map((r, i) => (
         <Lift key={i} rect={r} />

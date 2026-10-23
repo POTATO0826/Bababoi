@@ -1,6 +1,9 @@
 // Packs each bay's units into the bay rect. Every placement is one instance of a template.
-import { PENDING_NOTE, type FloorId, type FurnitureKind } from "@/data/catalog";
-import { AREAS, BAYS, type Bay } from "@/data/layout";
+// Input is the persisted occupancy (bay → SKU, quantity) and the pending receiving drafts from the
+// current snapshot; nothing here recomputes positions from SKU totals.
+import { AREAS } from "@/data/layout";
+import type { Inventory, LocationView, ProductView } from "@/lib/inventory";
+import type { FloorId, FurnitureKind } from "@/shared/contracts";
 import type { TemplateId } from "./templates";
 
 export interface Placement {
@@ -59,9 +62,8 @@ const GRIDS: Partial<Record<FurnitureKind, Grid>> = {
 
 const PALLET_H = 0.122;
 
-function placeBay(bay: Bay): Placement[] {
-  const s = bay.sku!;
-  const n = bay.qty;
+function placeBay(bay: LocationView, s: ProductView): Placement[] {
+  const n = bay.quantity;
   const [x0, z0, x1, z1] = bay.rect;
   const cx = (x0 + x1) / 2;
   const cz = (z0 + z1) / 2;
@@ -93,7 +95,7 @@ function placeBay(bay: Bay): Placement[] {
 
   switch (s.kind) {
     case "wardrobe": {
-      const tpl: TemplateId = s.model.doors >= 3 ? "wardrobe3" : "wardrobe2";
+      const tpl: TemplateId = s.doors >= 3 ? "wardrobe3" : "wardrobe2";
       for (let i = 0; i < Math.min(n, 2); i++) add(tpl, cx + (i - 0.5) * 2.7, 0, cz, 0.5);
       break;
     }
@@ -139,13 +141,17 @@ function placeBay(bay: Bay): Placement[] {
   return out;
 }
 
-/** The pending supplier note DN-2291: wrapped units waiting in the inbound dock, not yet on hand. */
-function pendingDelivery(): Placement[] {
+/** Wrapped units drawn in the inbound dock at most; the hover card always states the exact total. */
+export const MAX_PENDING_MESHES = 8;
+
+/** Receiving drafts not yet posted: wrapped units waiting in the inbound dock, not on hand. */
+function pendingDelivery(units: number): Placement[] {
+  const n = Math.min(units, MAX_PENDING_MESHES);
   const [x0, , x1] = AREAS.inbound;
   const mid = (x0 + x1) / 2;
-  return Array.from({ length: PENDING_NOTE.qty }, (_, i) => ({
+  return Array.from({ length: n }, (_, i) => ({
     tpl: "wrapped" as const,
-    x: mid + (i - (PENDING_NOTE.qty - 1) / 2) * 3.0,
+    x: mid + (i - (n - 1) / 2) * 3.0,
     y: 0,
     z: 4.1 + (i % 2) * 0.25,
     ry: (hash("pending", i) - 0.5) * 0.08,
@@ -154,13 +160,21 @@ function pendingDelivery(): Placement[] {
   }));
 }
 
-export const PENDING_RECT = (() => {
-  const xs = pendingDelivery().map((p) => p.x);
+/** Footprint of the pending units in the dock, or null when nothing is pending. */
+export function pendingRect(units: number) {
+  if (units <= 0) return null;
+  const xs = pendingDelivery(units).map((p) => p.x);
   return [Math.min(...xs) - 1.6, 3.3, Math.max(...xs) + 1.6, 5.2] as const;
-})();
+}
 
-export function placementsFor(floor: FloorId): Placement[] {
-  const out = BAYS[floor].filter((b) => b.sku && b.qty > 0).flatMap(placeBay);
-  if (floor === 1) out.push(...pendingDelivery());
+export function placementsFor(floor: FloorId, inv: Inventory): Placement[] {
+  const out: Placement[] = [];
+  for (const bay of inv.byFloor[floor]) {
+    if (!bay.sku || bay.quantity <= 0) continue;
+    const product = inv.bySku.get(bay.sku);
+    if (product) out.push(...placeBay(bay, product));
+  }
+  // The inbound dock is on floor 1.
+  if (floor === 1) out.push(...pendingDelivery(inv.pendingUnits));
   return out;
 }

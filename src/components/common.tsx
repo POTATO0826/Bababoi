@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
-import type { CategoryId, Totals } from "@/data/catalog";
+import type { Totals } from "@/lib/inventory";
+import type { CategoryId } from "@/shared/contracts";
 import { cn } from "@/lib/utils";
 
 export function Swatch({ color, size = 10, className }: { color: string; size?: number; className?: string }) {
@@ -54,8 +55,9 @@ export function StatTiles({ totals, size = "lg" }: { totals: Omit<Totals, "skus"
                 brand && "text-brand-value",
               )}
             >
-              {totals[key]}
+              {totals[key] ?? "—"}
             </div>
+            {totals[key] === null && <div className="truncate text-[10px] text-faint">warehouse-wide</div>}
           </div>
         );
       })}
@@ -91,7 +93,7 @@ export function TotalsStrip({
             <div className={cn("truncate text-[9.5px] tracking-[.05em] uppercase", brand ? "text-brand-light" : "text-faint")}>
               {labels[i]}
             </div>
-            <div className={cn("font-mono text-[13px] font-semibold tabular-nums", brand && "text-brand-value")}>{totals[key]}</div>
+            <div className={cn("font-mono text-[13px] font-semibold tabular-nums", brand && "text-brand-value")}>{totals[key] ?? "—"}</div>
           </div>
         );
       })}

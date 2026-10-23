@@ -1,40 +1,12 @@
-// Synthetic seed data from the WareOrb prototype (docs/design-handoff.md → Data model).
-// The stock ledger is the source of truth; the 3D scene only visualises it.
+// Synthetic DEMO SEED INPUT from the WareOrb prototype (docs/design-handoff.md → Data model).
+//
+// This module is read only by the explicit, non-destructive seeder (`bun run db:seed`,
+// src/server/db/seed.ts). It is NOT live stock: the browser reads quantities, positions and
+// history from the persisted ledger through GET /api/warehouse. The onHand / reserved / incoming
+// numbers below are opening values the seeder converts once into labelled synthetic records.
+import type { CategoryId, FloorId, FurnitureKind, ZoneId } from "@/shared/contracts";
 
-export type FloorId = 1 | 2;
-export type ZoneId = "A" | "B" | "C" | "D";
-export type CategoryId = "sofas" | "tables" | "chairs" | "wardrobes" | "beds" | "general";
-
-/** Furniture template used by the 3D scene. Each kind has its own mesh and bay packing. */
-export type FurnitureKind =
-  | "sofa"
-  | "sofaL"
-  | "recliner"
-  | "table"
-  | "tableRound"
-  | "coffee"
-  | "side"
-  | "console"
-  | "desk"
-  | "glass"
-  | "chair"
-  | "stool"
-  | "armchair"
-  | "office"
-  | "lounge"
-  | "rocking"
-  | "kids"
-  | "wardrobe"
-  | "cabinet"
-  | "bed"
-  | "bedSingle"
-  | "bunk"
-  | "daybed"
-  | "mattress"
-  | "rug"
-  | "lamp"
-  | "carton"
-  | "mirror";
+export type { CategoryId, FloorId, FurnitureKind, ZoneId } from "@/shared/contracts";
 
 interface SkuSeed {
   sku: string; // CATEGORY-MANUFACTURER-MODEL
@@ -149,110 +121,62 @@ const SEED: CategorySeed[] = [
   },
 ];
 
-export interface Category {
+export interface SeedCategory {
   id: CategoryId;
   name: string;
-  models: Model[];
-  skus: Sku[];
 }
 
-export interface Model {
-  name: string;
-  category: Category;
-  doors: number;
-  skus: Sku[];
-}
-
-export interface Sku extends SkuSeed {
-  category: Category;
-  model: Model;
+/** One SKU of the demo catalogue, flattened, with its opening quantities. */
+export interface SeedProduct {
+  sku: string;
+  categoryId: CategoryId;
+  modelName: string;
+  variant: string;
+  color: string;
   kind: FurnitureKind;
-  /** Max units stored per bay. */
-  cap: number;
+  doors: number;
+  /** Configured demo slot rule: max units of this SKU per bay (not a measured load rating). */
+  unitsPerBay: number;
+  /** Seeded floor/zone: a navigation preference, not authoritative stock ownership. */
+  homeFloor: FloorId;
+  homeZone: ZoneId;
+  opening: { onHand: number; reserved: number; incoming: number };
 }
 
-function build(): { categories: Category[]; skus: Sku[] } {
-  const categories: Category[] = [];
-  const skus: Sku[] = [];
-  for (const c of SEED) {
-    const category: Category = { id: c.id, name: c.name, models: [], skus: [] };
-    for (const m of c.models) {
-      const model: Model = { name: m.name, category, doors: m.doors ?? 2, skus: [] };
-      for (const s of m.skus) {
-        const sku: Sku = { ...s, category, model, kind: m.kind ?? c.kind, cap: m.cap ?? c.cap };
-        model.skus.push(sku);
-        category.skus.push(sku);
-        skus.push(sku);
-      }
-      category.models.push(model);
-    }
-    categories.push(category);
-  }
-  return { categories, skus };
-}
+export const SEED_CATEGORIES: readonly SeedCategory[] = SEED.map((c) => ({ id: c.id, name: c.name }));
 
-export const { categories: CATEGORIES, skus: SKUS } = build();
-export const SKU_BY_CODE = new Map(SKUS.map((s) => [s.sku, s]));
+export const SEED_PRODUCTS: readonly SeedProduct[] = SEED.flatMap((c) =>
+  c.models.flatMap((m) =>
+    m.skus.map(
+      (s): SeedProduct => ({
+        sku: s.sku,
+        categoryId: c.id,
+        modelName: m.name,
+        variant: s.variant,
+        color: s.color,
+        kind: m.kind ?? c.kind,
+        doors: m.doors ?? 2,
+        unitsPerBay: m.cap ?? c.cap,
+        homeFloor: s.floor,
+        homeZone: s.zone,
+        opening: { onHand: s.onHand, reserved: s.reserved, incoming: s.incoming },
+      }),
+    ),
+  ),
+);
 
-export const DEMO_SKU = "SOFA-HAVN-2140";
-
-/** The one supplier note still awaiting human verification (concept §5). */
-export const PENDING_NOTE = { id: "DN-2291", sku: DEMO_SKU, qty: 4 } as const;
-
-export const available = (s: Pick<Sku, "onHand" | "reserved">) => s.onHand - s.reserved;
-export const isLow = (s: Sku, threshold: number) => available(s) <= threshold;
-export const skuTitle = (s: Sku) => `${s.model.name} · ${s.variant}`;
-
-export interface Totals {
-  skus: number;
-  onHand: number;
-  reserved: number;
-  available: number;
-  incoming: number;
-}
-
-export function totals(list: readonly Sku[]): Totals {
-  const t: Totals = { skus: list.length, onHand: 0, reserved: 0, available: 0, incoming: 0 };
-  for (const s of list) {
-    t.onHand += s.onHand;
-    t.reserved += s.reserved;
-    t.available += available(s);
-    t.incoming += s.incoming;
-  }
-  return t;
-}
-
-export const skusOnFloor = (floor: FloorId) => SKUS.filter((s) => s.floor === floor);
-
-/** The category stored in a zone (each zone holds one category per floor). */
-export function zoneCategory(floor: FloorId, zone: ZoneId): Category | null {
-  return SKUS.find((s) => s.floor === floor && s.zone === zone)?.category ?? null;
-}
-
-export function matchesQuery(s: Sku, q: string) {
-  return `${s.sku} ${s.model.name} ${s.variant} ${s.category.name}`.toLowerCase().includes(q);
-}
-
-interface HistoryRow {
-  t: string;
-  text: string;
-  d: string;
-}
-
-const HISTORY: Record<string, HistoryRow[]> = {
-  "SOFA-HAVN-2140": [
-    { t: "09:12", text: "Received · DN-2291", d: "+4" },
-    { t: "Yesterday", text: "Reserved · Booking B-1180", d: "−2" },
-    { t: "Mon", text: "Dispatched · Order O-5531", d: "−1" },
+/**
+ * The supplier note still awaiting human verification (concept §5). Seeded as an editable DRAFT
+ * linked to the SKU's confirmed incoming purchase line; it is not an already-posted receipt.
+ * Floor 1 Zone A is full, so the draft proposes two empty Zone B bays for review.
+ */
+export const DEMO_PENDING_NOTE = {
+  documentRef: "DN-2291",
+  supplierRef: "Havn Living (synthetic supplier)",
+  sku: "SOFA-HAVN-2140",
+  quantity: 4,
+  proposedAllocations: [
+    { locationId: "1B23", quantity: 2 },
+    { locationId: "1B24", quantity: 2 },
   ],
-};
-
-export function historyFor(s: Sku): HistoryRow[] {
-  return (
-    HISTORY[s.sku] ?? [
-      { t: "Today", text: `Reserved · Booking B-${1100 + s.onHand * 7}`, d: `−${Math.min(s.reserved, 2)}` },
-      { t: "Tue", text: `Received · DN-${2200 + s.onHand * 3}`, d: `+${Math.min(s.onHand, s.cap)}` },
-      { t: "Last week", text: "Count verified · J. Lim", d: "0" },
-    ]
-  );
-}
+} as const;

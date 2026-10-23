@@ -1,10 +1,13 @@
+import { useEffect } from "react";
 import { Header } from "@/components/header";
 import { InventoryColumn } from "@/components/inventory/inventory-column";
 import { JarvisSession } from "@/components/jarvis/jarvis-session";
+import { ReceivingDrawer } from "@/components/receiving/receiving-drawer";
 import { Viewport } from "@/components/viewport/viewport";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useLayoutTier } from "@/hooks/use-layout";
 import { cn } from "@/lib/utils";
+import { startSync } from "@/server-data";
 import { useWare } from "@/store";
 
 // Body grid per docs/design-handoff.md → Layout. `stacked` (<720px) is an addition for phones.
@@ -21,6 +24,9 @@ export function App() {
   const drawer = tier === "narrow" || tier === "stacked";
   const fixedRows = tier === "wide" || tier === "mid";
   const cols = COLUMNS[tier];
+
+  // Load the persisted snapshot; refresh on focus and every ~15 s while visible.
+  useEffect(() => startSync(), []);
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -43,6 +49,7 @@ export function App() {
           {agentOpen && <JarvisSession drawer={drawer} />}
         </div>
       </div>
+      <ReceivingDrawer />
     </TooltipProvider>
   );
 }

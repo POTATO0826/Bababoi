@@ -1,6 +1,11 @@
 // Warehouse geometry, ported from WareTwin docs/layout/gen_layout.py (see docs/design-handoff.md).
 // World units are metres: x along the 100 m floor, z along the 70 m floor, y up.
-import { SKUS, type FloorId, type Sku, type ZoneId } from "./catalog";
+// Geometry is immutable for this version. Which SKU sits in which bay is persisted stock state,
+// read from GET /api/warehouse — it is never recomputed here from SKU totals.
+import { FLOOR_IDS, ZONE_IDS as ZONES_ORDER, type FloorId, type ZoneId } from "@/shared/contracts";
+
+/** Bumped whenever bay IDs, codes or rectangles change; the server stores the version it was seeded with. */
+export const GEOMETRY_VERSION = "waretwin-gen-layout-v1";
 
 /** [x0, z0, x1, z1] */
 export type Rect = readonly [number, number, number, number];
@@ -8,7 +13,7 @@ export type Rect = readonly [number, number, number, number];
 export const FLOOR_W = 100;
 export const FLOOR_D = 70;
 export const FLOOR_CENTER = [FLOOR_W / 2, FLOOR_D / 2] as const;
-export const ZONE_IDS: readonly ZoneId[] = ["A", "B", "C", "D"];
+export const ZONE_IDS: readonly ZoneId[] = ZONES_ORDER;
 
 export const ZONES: Record<ZoneId, Rect> = {
   A: [4, 10, 46, 32],
@@ -43,7 +48,8 @@ const PITCH_Z = 7;
 const OFFSET_X = 0.9;
 const OFFSET_Z = 2.5;
 
-export interface Bay {
+/** A storage bay (location). `id` is the stable legacy bay ID, e.g. "1B23"; `code` repeats across floors. */
+export interface BayGeometry {
   id: string;
   floor: FloorId;
   zone: ZoneId;
@@ -51,8 +57,6 @@ export interface Bay {
   index: number;
   code: string; // {zone}-{row}-{bay:02}, e.g. A-2-03
   rect: Rect;
-  sku: Sku | null;
-  qty: number;
 }
 
 export function bayRect(zone: ZoneId, row: number, index: number): Rect {
@@ -62,42 +66,24 @@ export function bayRect(zone: ZoneId, row: number, index: number): Rect {
   return [bx, bz, bx + BAY_W, bz + BAY_D];
 }
 
-/** SKUs fill bays in order, `min(cap, remaining)` units per bay. */
-function buildBays(floor: FloorId): Bay[] {
-  const out: Bay[] = [];
-  for (const zone of ZONE_IDS) {
-    const slots: [number, number][] = [];
-    for (let r = 0; r < ROWS; r++) for (let b = 0; b < BAYS_PER_ROW; b++) slots.push([r, b]);
-    let i = 0;
-    const make = (row: number, index: number, sku: Sku | null, qty: number): Bay => ({
-      id: `${floor}${zone}${row}${index}`,
-      floor,
-      zone,
-      row,
-      index,
-      code: `${zone}-${row + 1}-${String(index + 1).padStart(2, "0")}`,
-      rect: bayRect(zone, row, index),
-      sku,
-      qty,
-    });
-    for (const s of SKUS.filter((x) => x.floor === floor && x.zone === zone)) {
-      let remaining = s.onHand;
-      while (remaining > 0 && i < slots.length) {
-        const qty = Math.min(s.cap, remaining);
-        const [r, b] = slots[i++]!;
-        out.push(make(r, b, s, qty));
-        remaining -= qty;
-      }
-    }
-    while (i < slots.length) {
-      const [r, b] = slots[i++]!;
-      out.push(make(r, b, null, 0));
-    }
-  }
-  return out;
-}
+export const bayId = (floor: FloorId, zone: ZoneId, row: number, index: number) => `${floor}${zone}${row}${index}`;
+export const bayCode = (zone: ZoneId, row: number, index: number) => `${zone}-${row + 1}-${String(index + 1).padStart(2, "0")}`;
 
-export const BAYS: Record<FloorId, Bay[]> = { 1: buildBays(1), 2: buildBays(2) };
+/** All 144 bays in fill order: floor, zone, row, index. */
+export const LOCATION_GEOMETRY: readonly BayGeometry[] = FLOOR_IDS.flatMap((floor) =>
+  ZONE_IDS.flatMap((zone) =>
+    Array.from({ length: ROWS * BAYS_PER_ROW }, (_, i) => {
+      const row = Math.floor(i / BAYS_PER_ROW);
+      const index = i % BAYS_PER_ROW;
+      return { id: bayId(floor, zone, row, index), floor, zone, row, index, code: bayCode(zone, row, index), rect: bayRect(zone, row, index) };
+    }),
+  ),
+);
+
+export const GEOMETRY_BY_ID: ReadonlyMap<string, BayGeometry> = new Map(LOCATION_GEOMETRY.map((b) => [b.id, b]));
+
+/** Position of a bay in its zone's fill order (row-major); consecutive slots are adjacent bays. */
+export const slotIndex = (b: { row: number; index: number }) => b.row * BAYS_PER_ROW + b.index;
 
 export interface RackRow {
   zone: ZoneId;
@@ -114,15 +100,3 @@ export const RACK_ROWS: readonly RackRow[] = ZONE_IDS.flatMap((zone) =>
   }),
 );
 export const BAY_GAP = PITCH_X - BAY_W;
-
-export function codesFor(s: Sku): { code: string; qty: number }[] {
-  return BAYS[s.floor].filter((b) => b.sku === s).map((b) => ({ code: b.code, qty: b.qty }));
-}
-
-export function locationText(s: Sku) {
-  const codes = codesFor(s);
-  const span = codes.length
-    ? codes[0]!.code + (codes.length > 1 ? ` – ${codes[codes.length - 1]!.code}` : "")
-    : "—";
-  return `F${s.floor} · Zone ${s.zone} · ${span}`;
-}

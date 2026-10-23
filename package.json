@@ -4,10 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --hot src/index.ts",
+    "dev": "DEMO_AUTH=1 bun --hot src/index.ts",
     "start": "NODE_ENV=production bun src/index.ts",
     "build": "bun run build.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "db:migrate": "bun src/server/db/cli.ts migrate",
+    "db:seed": "bun src/server/db/cli.ts seed",
+    "db:status": "bun src/server/db/cli.ts status"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.5",

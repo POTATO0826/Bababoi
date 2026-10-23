@@ -3,9 +3,9 @@ import { closeAgent, runCommand, toggleMute, voiceInputSupported } from "@/actio
 import { Kicker, Swatch, TotalsStrip, WarehouseIcon } from "@/components/common";
 import { JarvisOrb, OrbStatus } from "@/components/jarvis/orb";
 import { Button } from "@/components/ui/button";
-import { SKU_BY_CODE, available, skuTitle, zoneCategory } from "@/data/catalog";
-import { codesFor } from "@/data/layout";
+import { available, skuTitle, zoneLabel, zonesText } from "@/lib/inventory";
 import { cn } from "@/lib/utils";
+import { useInventory } from "@/server-data";
 import { useWare } from "@/store";
 
 const SUGGESTIONS = ["Take me to the grey L-shaped sofa", "Show low-stock items", "Analyze today’s changes"];
@@ -19,7 +19,8 @@ export function JarvisSession({ drawer, className }: { drawer: boolean; classNam
   const transcript = useWare((s) => s.transcript);
 
   const lastUser = transcript.filter((t) => t.who === "user").at(-1)?.text;
-  const lastAi = transcript.filter((t) => t.who === "ai").at(-1)?.text ?? "";
+  const lastAiLine = transcript.filter((t) => t.who === "ai").at(-1);
+  const lastAi = lastAiLine?.text ?? "";
   const heard = interim
     ? `“${interim}”`
     : (lastUser ??
@@ -30,7 +31,7 @@ export function JarvisSession({ drawer, className }: { drawer: boolean; classNam
           : voiceInputSupported()
             ? "Say a command…"
             : "Voice input isn’t supported in this browser — tap a suggestion below."));
-  const reply = orb === "thinking" ? "Checking the verified ledger…" : lastAi;
+  const reply = orb === "thinking" ? "Reading the stock ledger…" : lastAi;
 
   return (
     <aside
@@ -54,6 +55,7 @@ export function JarvisSession({ drawer, className }: { drawer: boolean; classNam
         <div className="flex min-h-[84px] w-full flex-col items-center gap-2 text-center" aria-live="polite">
           <span className="text-[13px] text-faint italic">{heard}</span>
           <span className="text-[15px] leading-normal text-pretty text-foreground">{reply}</span>
+          {orb !== "thinking" && lastAiLine?.meta && <span className="font-mono text-[10.5px] text-faint">{lastAiLine.meta}</span>}
         </div>
         <OnTheMap />
         <div className="flex w-full flex-col gap-1.5">
@@ -98,9 +100,11 @@ function OnTheMap() {
   const floor = useWare((s) => s.floor);
   const zone = useWare((s) => s.zone);
   const view = useWare((s) => s.view);
-  const selected = useWare((s) => (s.selected ? SKU_BY_CODE.get(s.selected) : undefined));
-  const zc = zone ? zoneCategory(floor, zone) : null;
-  const line = `Floor ${floor}${zone ? ` · ${zc?.name ?? "Zone"} · Zone ${zone}` : " · Overview"}${view === "top" ? " · Top-down" : ""}`;
+  const inv = useInventory();
+  const selectedSku = useWare((s) => s.selected);
+  const selected = selectedSku ? inv?.bySku.get(selectedSku) : undefined;
+  const zc = zone && inv ? zoneLabel(inv, floor, zone) : null;
+  const line = `Floor ${floor}${zone ? ` · ${zc ?? "Zone"} · Zone ${zone}` : " · Overview"}${view === "top" ? " · Top-down" : ""}`;
 
   return (
     <div className="flex w-full flex-col gap-1.5">
@@ -116,16 +120,17 @@ function OnTheMap() {
             <span className="flex min-w-0 flex-col">
               <span className="truncate text-[13px] font-semibold">{skuTitle(selected)}</span>
               <span className="font-mono text-[11px] text-muted-foreground">
-                {selected.sku} · Floor {selected.floor} · Zone {selected.zone}
+                {selected.sku} · {zonesText(selected)}
               </span>
             </span>
           </div>
           <TotalsStrip totals={{ ...selected, available: available(selected) }} short className="border-border bg-border" />
           <div className="flex flex-wrap gap-1">
-            {codesFor(selected).map((c) => (
-              <span key={c.code} className="inline-flex h-5 items-center rounded-sm border border-brand/35 px-[7px] font-mono text-[10.5px]">
+            {selected.locations.map((c) => (
+              <span key={c.id} className="inline-flex h-5 items-center rounded-sm border border-brand/35 px-[7px] font-mono text-[10.5px]">
+                <span className="mr-1 text-faint">F{c.floor}</span>
                 {c.code}
-                <span className="ml-[5px] text-faint">×{c.qty}</span>
+                <span className="ml-[5px] text-faint">×{c.quantity}</span>
               </span>
             ))}
           </div>

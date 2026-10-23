@@ -3,6 +3,7 @@ import { Canvas } from "@react-three/fiber";
 import { useState } from "react";
 import * as THREE from "three";
 import { FLOOR_D, FLOOR_W } from "@/data/layout";
+import { useInventory } from "@/server-data";
 import { useWare } from "@/store";
 import { BaysLayer } from "./bays";
 import { CameraRig } from "./camera-rig";
@@ -50,6 +51,8 @@ function Lights() {
 
 export default function WarehouseCanvas() {
   const floor = useWare((s) => s.floor);
+  // Stock comes only from the persisted snapshot; without one the building is drawn empty.
+  const inventory = useInventory();
   // Drop resolution and soft shadows if the device can't hold the frame rate.
   const [degraded, setDegraded] = useState(false);
 
@@ -68,9 +71,9 @@ export default function WarehouseCanvas() {
       <PerformanceMonitor onDecline={() => setDegraded(true)} flipflops={2} />
       <CameraRig />
       <Lights />
-      <Structure floor={floor} />
-      <BaysLayer floor={floor} />
-      <FurnitureLayer floor={floor} />
+      <Structure floor={floor} pendingUnits={inventory?.pendingUnits ?? 0} />
+      {inventory && <BaysLayer floor={floor} inventory={inventory} />}
+      {inventory && <FurnitureLayer floor={floor} inventory={inventory} />}
     </Canvas>
   );
 }

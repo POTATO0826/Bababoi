@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CategoryId, FloorId, ZoneId } from "@/data/catalog";
+import type { CategoryId, FloorId, ZoneId } from "@/shared/contracts";
 
 export type ViewMode = "iso" | "top";
 export type OrbState = "idle" | "listening" | "thinking" | "speaking";
@@ -7,6 +7,8 @@ export type OrbState = "idle" | "listening" | "thinking" | "speaking";
 export interface TranscriptLine {
   who: "ai" | "user";
   text: string;
+  /** Ledger provenance for factual replies, e.g. "Ledger rev 3 · as of 10:42". Shown, not spoken. */
+  meta?: string;
 }
 
 export interface Settings {
@@ -25,6 +27,8 @@ export interface WareState {
   zoomMul: number;
   zone: ZoneId | null;
   selected: string | null; // SKU code
+  /** Bay the user clicked to select (keeps focus on that bay's zone instead of the SKU's default). */
+  focusBay: string | null;
   openCat: CategoryId | null;
   hoverBay: string | null;
   query: string;
@@ -33,6 +37,10 @@ export interface WareState {
   /** Scene fades out while the floor swaps. */
   fading: boolean;
   dragging: boolean;
+
+  /** Receiving review drawer: a draft ID, or null for the list of pending drafts. */
+  receivingOpen: boolean;
+  receivingId: string | null;
 
   agentOpen: boolean;
   muted: boolean;
@@ -63,12 +71,16 @@ export const useWare = create<WareState>()(() => ({
   zoomMul: 1,
   zone: null,
   selected: null,
+  focusBay: null,
   openCat: "sofas",
   hoverBay: null,
   query: "",
   panelOpen: false,
   fading: false,
   dragging: false,
+
+  receivingOpen: false,
+  receivingId: null,
 
   agentOpen: false,
   muted: false,

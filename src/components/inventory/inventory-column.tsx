@@ -1,5 +1,5 @@
 import { SearchIcon, XIcon } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { selectSku, switchFloor, toggleCategory } from "@/actions";
 import { CardHeading, CategoryIcon, StatTiles, Swatch, TotalsStrip } from "@/components/common";
 import { JarvisDock } from "@/components/jarvis/jarvis-dock";
@@ -7,35 +7,35 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  CATEGORIES,
-  SKUS,
   available,
+  floorsOf,
   isLow,
+  locationText,
   matchesQuery,
   skuTitle,
-  skusOnFloor,
-  totals,
-  zoneCategory,
-  type Category,
-  type FloorId,
-  type Sku,
-} from "@/data/catalog";
-import { locationText } from "@/data/layout";
+  totalsOf,
+  zoneCategories,
+  type CategoryView,
+  type Inventory,
+  type ProductView,
+} from "@/lib/inventory";
 import { cn } from "@/lib/utils";
+import { signIn, useInventory, useServerData } from "@/server-data";
+import type { FloorId } from "@/shared/contracts";
+import { localTime } from "@/shared/time";
 import { setWare, useWare } from "@/store";
-
-const TOTAL_UNITS = SKUS.reduce((a, s) => a + s.onHand, 0);
 
 export function InventoryColumn({ wide, className }: { wide: boolean; className?: string }) {
   const query = useWare((s) => s.query);
   const q = query.trim().toLowerCase();
+  const inventory = useInventory();
 
   return (
     <aside className={cn("flex min-h-0 flex-col gap-3", className)}>
       <div className="flex flex-col gap-2.5 px-0.5 pt-0.5">
         <div className="flex items-baseline justify-between">
           <h1 className="text-[17px] font-semibold tracking-[-.01em]">Inventory</h1>
-          <span className="font-mono text-xs text-muted-foreground">{TOTAL_UNITS} units</span>
+          <span className="font-mono text-xs text-muted-foreground">{inventory ? `${inventory.totals.onHand} units` : "—"}</span>
         </div>
         <div className="relative">
           <SearchIcon className="pointer-events-none absolute top-[11px] left-[11px] size-[15px] text-faint" />
@@ -62,12 +62,13 @@ export function InventoryColumn({ wide, className }: { wide: boolean; className?
       </div>
 
       <div data-inventory-scroll className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
-        {q ? (
-          <Results q={q} />
+        <LedgerNotice />
+        {!inventory ? null : q ? (
+          <Results inventory={inventory} q={q} />
         ) : (
           <>
-            <TotalsCard />
-            <CategoryList wide={wide} />
+            <TotalsCard inventory={inventory} />
+            <CategoryList inventory={inventory} wide={wide} />
           </>
         )}
       </div>
@@ -77,12 +78,61 @@ export function InventoryColumn({ wide, className }: { wide: boolean; className?
   );
 }
 
-const floorCats = (f: FloorId) => [...new Set(skusOnFloor(f).map((s) => s.category.name))].join(", ");
-const floorUnits = (f: FloorId) => skusOnFloor(f).reduce((a, s) => a + s.onHand, 0);
+/** Loading, unavailable or stale ledger state. Never falls back to seed quantities. */
+function LedgerNotice() {
+  const status = useServerData((st) => st.status);
+  const stale = useServerData((st) => st.stale);
+  const error = useServerData((st) => st.error);
+  const auth = useServerData((st) => st.auth);
+  const syncedAt = useServerData((st) => st.syncedAt);
+  const tz = useServerData((st) => st.inventory?.warehouse.timezone ?? "UTC");
+  const personas = useServerData((st) => st.personas);
+  if (status === "ready" && !stale) return null;
+  const text =
+    status === "loading"
+      ? auth === "anonymous"
+        ? "Choose a demo persona (top right) to load the stock ledger."
+        : auth === "disabled"
+          ? "Sign-in is not configured on this server (start it with DEMO_AUTH=1 for the labelled demo)."
+          : "Loading stock from the ledger…"
+      : status === "error"
+        ? `Stock ledger unavailable: ${error ?? "unknown error"}. No quantities are shown rather than unverified ones.`
+        : `Showing the last synced snapshot (${syncedAt ? localTime(syncedAt, tz) : "—"}). ${error ?? ""} Stock confirmations are disabled until the ledger is reachable.`;
+  return (
+    <div
+      role="status"
+      className={cn(
+        "flex-none rounded-xl border px-3.5 py-3 text-[12.5px] leading-snug",
+        status === "loading" ? "border-border bg-card text-muted-foreground" : "border-warn/40 bg-warn/6 text-warn",
+      )}
+    >
+      {text}
+      {auth === "anonymous" && personas.length > 0 && (
+        <div className="mt-2.5 flex flex-col gap-1.5">
+          <span className="text-[10.5px] tracking-[.05em] text-faint uppercase">Synthetic demo personas</span>
+          {personas.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => void signIn(p.id)}
+              className="flex items-center gap-2 rounded-md border border-border bg-inset px-2 py-1.5 text-left text-[12.5px] text-foreground transition-colors hover:bg-hover-row"
+            >
+              <span className="flex size-6 items-center justify-center rounded-full bg-secondary text-[10px] font-semibold">{p.initials}</span>
+              {p.name}
+              <span className="ml-auto text-[11px] text-faint capitalize">{p.role}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
-function TotalsCard() {
+const floorCats = (inv: Inventory, f: FloorId) =>
+  [...new Set(inv.byFloor[f].filter((l) => l.sku).map((l) => inv.bySku.get(l.sku!)?.categoryName))].filter(Boolean).join(", ");
+
+function TotalsCard({ inventory: inv }: { inventory: Inventory }) {
   const floor = useWare((s) => s.floor);
-  const all = useMemo(() => totals(SKUS), []);
+  const all = inv.totals;
   return (
     <section className="flex flex-none flex-col gap-3 rounded-xl border border-border bg-card p-3.5">
       <div className="flex items-center justify-between">
@@ -102,8 +152,8 @@ function TotalsCard() {
             )}
           >
             <span className="text-[11px] text-muted-foreground">Floor {f}</span>
-            <span className="font-mono text-[13px] font-semibold">{floorUnits(f)} units</span>
-            <span className="text-[11px] text-faint">{floorCats(f)}</span>
+            <span className="font-mono text-[13px] font-semibold">{inv.floorTotals[f].units} units</span>
+            <span className="text-[11px] text-faint">{floorCats(inv, f)}</span>
           </button>
         ))}
       </div>
@@ -111,34 +161,36 @@ function TotalsCard() {
   );
 }
 
-function CategoryList({ wide }: { wide: boolean }) {
+function CategoryList({ inventory, wide }: { inventory: Inventory; wide: boolean }) {
   return (
     <section className="flex-none overflow-hidden rounded-xl border border-border bg-card">
-      {CATEGORIES.map((c, i) => (
-        <CategoryRow key={c.id} category={c} first={i === 0} wide={wide} />
+      {inventory.categories.map((c, i) => (
+        <CategoryRow key={c.id} inventory={inventory} category={c} first={i === 0} wide={wide} />
       ))}
     </section>
   );
 }
 
-function CategoryRow({ category: c, first, wide }: { category: Category; first: boolean; wide: boolean }) {
+function CategoryRow({ inventory: inv, category: c, first, wide }: { inventory: Inventory; category: CategoryView; first: boolean; wide: boolean }) {
   const open = useWare((s) => s.openCat === c.id);
-  const active = useWare((s) => !!s.zone && zoneCategory(s.floor, s.zone) === c);
+  const active = useWare((s) => !!s.zone && zoneCategories(inv, s.floor, s.zone).some((z) => z.id === c.id));
   const threshold = useWare((s) => s.settings.lowStockThreshold);
-  const t = totals(c.skus);
+  const syncedAt = useServerData((s) => s.syncedAt);
+  const t = totalsOf(c.skus);
   const lowN = c.skus.filter((s) => isLow(s, threshold)).length;
-  const floors = [...new Set(c.skus.map((s) => s.floor))]
+  const floors = [...new Set(c.skus.flatMap(floorsOf))]
     .sort()
     .map((f) => `F${f}`)
     .join(" · ");
+  const at = syncedAt ? localTime(syncedAt, inv.warehouse.timezone) : "—";
 
   const status = lowN
     ? wide
       ? `${lowN} ${lowN === 1 ? "SKU" : "SKUs"} below threshold`
       : `${lowN} low stock`
     : wide
-      ? "All counts verified 09:42"
-      : "Verified 09:42";
+      ? `None below threshold · ledger ${at}`
+      : `OK · ${at}`;
 
   return (
     <div className={cn("transition-colors duration-200", !first && "border-t border-border", active && "bg-hover-row")}>
@@ -195,8 +247,8 @@ function CategoryRow({ category: c, first, wide }: { category: Category; first: 
   );
 }
 
-function Results({ q }: { q: string }) {
-  const results = SKUS.filter((s) => matchesQuery(s, q));
+function Results({ inventory, q }: { inventory: Inventory; q: string }) {
+  const results = inventory.products.filter((s) => matchesQuery(s, q));
   return (
     <section className="flex-none overflow-hidden rounded-xl border border-border bg-card">
       <div className="flex items-center justify-between border-b border-border px-3.5 pt-3 pb-2.5">
@@ -213,7 +265,7 @@ function Results({ q }: { q: string }) {
   );
 }
 
-function SkuRow({ sku: s, title }: { sku: Sku; title: string }) {
+function SkuRow({ sku: s, title }: { sku: ProductView; title: string }) {
   const selected = useWare((st) => st.selected === s.sku);
   const low = useWare((st) => isLow(s, st.settings.lowStockThreshold));
   const ref = useRef<HTMLButtonElement>(null);
@@ -233,7 +285,7 @@ function SkuRow({ sku: s, title }: { sku: Sku; title: string }) {
   return (
     <button
       ref={ref}
-      onClick={() => selectSku(s)}
+      onClick={() => selectSku(s.sku)}
       aria-current={selected || undefined}
       className={cn(
         "flex w-full items-center gap-2.5 border-t border-border-inner px-3.5 py-[9px] text-left transition-colors hover:bg-hover-row",
