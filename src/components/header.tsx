@@ -38,7 +38,7 @@ export function Header() {
           {live ? "Live" : "Offline"}
         </span>
         <Select value={role} onValueChange={(v) => setRole(v as Role)}>
-          <SelectTrigger size="sm" className="w-[150px]" aria-label="Acting as">
+          <SelectTrigger size="sm" className="w-[176px]" aria-label="Acting as">
             <SelectValue />
           </SelectTrigger>
           <SelectContent align="end">
