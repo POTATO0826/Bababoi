@@ -11,6 +11,7 @@
 import type * as ai from "../ai.js";
 import type * as aiData from "../aiData.js";
 import type * as deals from "../deals.js";
+import type * as http from "../http.js";
 import type * as lalamove from "../lalamove.js";
 import type * as ledger from "../ledger.js";
 import type * as lib from "../lib.js";
@@ -30,6 +31,7 @@ declare const fullApi: ApiFromModules<{
   ai: typeof ai;
   aiData: typeof aiData;
   deals: typeof deals;
+  http: typeof http;
   lalamove: typeof lalamove;
   ledger: typeof ledger;
   lib: typeof lib;

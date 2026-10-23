@@ -24,6 +24,8 @@ export interface Utterance {
   blob: Blob | null;
   /** What the browser recogniser heard in parallel (fallback when Fish is unavailable). */
   browserText: string;
+  /** Microphone permission was refused. */
+  denied?: boolean;
 }
 
 /**
@@ -57,7 +59,7 @@ export function recordUtterance(opts: { maxMs?: number; silenceMs?: number; lang
     } catch {
       // No microphone access: only the browser recogniser (if any) can help, and it needs the mic too.
       rec?.stop();
-      return { blob: null, browserText: "" };
+      return { blob: null, browserText: "", denied: true };
     }
     const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "";
     const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);

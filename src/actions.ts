@@ -1,6 +1,8 @@
 // Composite actions shared by the inventory list, the 3D scene and the Jarvis voice agent.
 import { toast } from "sonner";
+import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
+import { closePanel, openCommand, type CommandId } from "@/commands";
 import { convex, errorText, run } from "@/convex";
 import {
   CATEGORY_INFO,
@@ -17,6 +19,7 @@ import {
 import { baysNeeded, planBays, slotLabel } from "@/data/inventory";
 import { SLOT_BY_ID } from "@/data/layout";
 import { actorNow, getInventory, getWare, setWare, type ViewMode } from "@/store";
+import { recordUtterance, say, stopSpeaking, transcribe } from "@/voice/voice";
 
 const timers = new Set<ReturnType<typeof setTimeout>>();
 function later(fn: () => void, ms: number) {
@@ -124,158 +127,156 @@ export function toggleCategory(id: CategoryId) {
 }
 
 // ── Jarvis voice agent ────────────────────────────────────────────────────
-// Listening → thinking (900 ms) → speaking → listening. Uses the browser Web Speech API;
-// swap in your STT/TTS or a realtime voice provider in production.
+// listening → one utterance → thinking (Claude tools, or offline rules) → speaking (Fish, or the browser) → listening.
+// Jarvis only reads, navigates, opens panels and requests quotes; people click approve / post / collect.
 
-interface SpeechRecognitionResultLike {
-  isFinal: boolean;
-  0: { transcript: string };
-}
-interface SpeechRecognitionLike {
-  lang: string;
-  interimResults: boolean;
-  continuous: boolean;
-  onresult: ((ev: { resultIndex: number; results: ArrayLike<SpeechRecognitionResultLike> }) => void) | null;
-  onend: (() => void) | null;
-  onerror: ((ev: { error: string }) => void) | null;
-  start(): void;
-  abort(): void;
-}
-type RecognitionCtor = new () => SpeechRecognitionLike;
+let session = 0;
+let recording: { stop: () => void } | null = null;
+const forceOffline = typeof location !== "undefined" && new URLSearchParams(location.search).get("ai") === "0";
 
-function recognitionCtor(): RecognitionCtor | null {
-  if (typeof window === "undefined") return null;
-  const w = window as unknown as { SpeechRecognition?: RecognitionCtor; webkitSpeechRecognition?: RecognitionCtor };
-  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
-}
-export const voiceInputSupported = () => recognitionCtor() !== null;
-
-let rec: SpeechRecognitionLike | null = null;
-let speakTimer: ReturnType<typeof setTimeout> | null = null;
-let stepTimer: ReturnType<typeof setTimeout> | null = null;
+export const voiceInputSupported = () => typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
 
 function pushLine(who: "ai" | "user", text: string) {
   setWare((s) => ({ transcript: [...s.transcript, { who, text }].slice(-12) }));
 }
 
 export function speak(text: string) {
-  cancel(speakTimer);
+  const my = session;
   setWare({ orb: "speaking" });
   pushLine("ai", text);
   const done = () => {
-    if (getWare().orb !== "speaking") return;
+    if (my !== session || getWare().orb !== "speaking") return;
     setWare({ orb: getWare().agentOpen ? "listening" : "idle" });
-    startRec();
+    void listen();
   };
-  const { agentOpen, settings } = getWare();
-  const synth = typeof window !== "undefined" ? window.speechSynthesis : undefined;
-  if (synth && agentOpen && settings.voiceReplies) {
-    try {
-      synth.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.rate = 1.05;
-      u.onend = done;
-      u.onerror = done;
-      synth.speak(u);
-      speakTimer = later(done, 15000);
-      return;
-    } catch {
-      // fall through to the timed reply
-    }
-  }
-  speakTimer = later(done, 3200);
+  const { agentOpen, settings, lang } = getWare();
+  if (agentOpen && settings.voiceReplies) void say(text, lang).then(done);
+  else later(done, 2400);
 }
 
-function startRec() {
+async function listen() {
   const s = getWare();
-  if (!s.agentOpen || s.muted || s.orb !== "listening" || rec) return;
-  const SR = recognitionCtor();
-  if (!SR) return;
-  try {
-    const r = new SR();
-    r.lang = "en-US";
-    r.interimResults = true;
-    r.continuous = false;
-    r.onresult = (ev) => {
-      let text = "";
-      let final = false;
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        const res = ev.results[i]!;
-        text += res[0].transcript;
-        if (res.isFinal) final = true;
-      }
-      if (final) {
-        stopRec();
-        runCommand(text.trim());
-      } else setWare({ interim: text });
-    };
-    r.onend = () => {
-      rec = null;
-      const now = getWare();
-      if (now.agentOpen && !now.muted && now.orb === "listening") later(startRec, 300);
-    };
-    r.onerror = (ev) => {
-      rec = null;
-      if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
-        setWare({ micError: "Microphone blocked — tap a suggestion below instead." });
-      }
-    };
-    rec = r;
-    r.start();
-  } catch {
-    rec = null;
+  if (!s.agentOpen || s.muted || s.orb !== "listening" || recording || !voiceInputSupported()) return;
+  const my = session;
+  const rec = recordUtterance({ lang: s.lang, maxMs: 12_000, silenceMs: 1100 });
+  recording = rec;
+  const u = await rec.done;
+  recording = null;
+  if (my !== session || !getWare().agentOpen || getWare().muted) return;
+  if (u.denied) {
+    setWare({ micError: "Microphone blocked — tap a suggestion below." });
+    return;
   }
+  if (!u.blob && !u.browserText) {
+    later(() => void listen(), 200);
+    return;
+  }
+  setWare({ orb: "thinking", interim: "…" });
+  const t = await transcribe(u, getWare().lang);
+  if (my !== session) return;
+  if (!t.text) {
+    setWare({ orb: "listening", interim: "" });
+    later(() => void listen(), 200);
+    return;
+  }
+  void runCommand(t.text);
 }
 
-function stopRec() {
-  if (!rec) return;
-  try {
-    rec.onend = null;
-    rec.abort();
-  } catch {
-    // already stopped
-  }
-  rec = null;
+function stopListening() {
+  recording?.stop();
+  recording = null;
 }
 
 export function openAgent() {
   if (getWare().agentOpen) return;
+  session++;
   setWare({
     agentOpen: true,
     panelOpen: false,
     orb: "listening",
     interim: "",
     micError: null,
-    transcript: [{ who: "ai", text: "I’m listening. Ask where something is or how many are left." }],
+    transcript: [{ who: "ai", text: "I’m listening." }],
   });
-  startRec();
+  void listen();
 }
 
 export function closeAgent() {
-  stopRec();
-  cancel(speakTimer);
-  cancel(stepTimer);
-  try {
-    window.speechSynthesis?.cancel();
-  } catch {
-    // no synthesis available
-  }
+  session++;
+  stopListening();
+  stopSpeaking();
   setWare({ agentOpen: false, orb: "idle", interim: "" });
 }
 
 export function toggleMute() {
   const muted = !getWare().muted;
   setWare({ muted });
-  if (muted) stopRec();
-  else startRec();
+  if (muted) stopListening();
+  else if (getWare().orb === "listening") void listen();
+}
+
+type JarvisReply = FunctionReturnType<typeof api.ai.jarvisAsk>;
+
+function applyEffects(effects: JarvisReply["effects"]) {
+  for (const e of effects) {
+    if (e.type === "run_command") {
+      if (e.command === "close") closePanel();
+      else openCommand(e.command);
+    } else if (e.type === "open_deal") {
+      setWare({ detail: { kind: "deal", id: e.deal_id } });
+      showOnMap(e.sku_code);
+    } else if (e.type === "show_on_map") showOnMap(e.sku_code);
+  }
+}
+
+/** Runs a spoken (or tapped) request. Claude first; offline keyword rules if it is unavailable. */
+export async function runCommand(text: string) {
+  if (!text.trim()) return;
+  const my = ++session;
+  stopListening();
+  stopSpeaking();
+  setWare({ orb: "thinking", agentOpen: true, interim: "" });
+  pushLine("user", `“${text}”`);
+  if (!forceOffline) {
+    const s = getWare();
+    try {
+      const r = await Promise.race([
+        convex.action(api.ai.jarvisAsk, {
+          actor: actorNow(),
+          text,
+          context: { stage: s.stage, selected: s.selected, dealId: s.detail?.kind === "deal" ? s.detail.id : null },
+        }),
+        new Promise<null>((res) => setTimeout(() => res(null), 25_000)),
+      ]);
+      if (my !== session) return;
+      if (r && !r.unavailable) {
+        applyEffects(r.effects);
+        speak(r.reply || "Done.");
+        return;
+      }
+    } catch {
+      // fall through to offline rules
+    }
+  }
+  if (my === session) answerOffline(text.toLowerCase());
 }
 
 const CATEGORY_WORDS: [RegExp, CategoryId][] = [
-  [/sofa|couch/, "sofas"],
-  [/table|desk/, "tables"],
-  [/chair|stool/, "chairs"],
-  [/wardrobe|cabinet/, "wardrobes"],
-  [/\bbeds?\b/, "beds"],
+  [/sofa|couch|沙发/, "sofas"],
+  [/table|desk|桌/, "tables"],
+  [/chair|stool|椅/, "chairs"],
+  [/wardrobe|cabinet|衣柜|柜/, "wardrobes"],
+  [/\bbeds?\b|床/, "beds"],
+];
+
+const COMMAND_WORDS: [RegExp, CommandId, string, string][] = [
+  [/quote|lalamove|运费|报价|送货/, "delivery", "Delivery quotes are open.", "运费报价已打开。"],
+  [/approv|审核|批准/, "approve", "Approvals are open.", "待审核已打开。"],
+  [/collect|pick ?up|出货|发货|提货/, "collect", "Collections are open.", "待取货已打开。"],
+  [/receiv|delivery note|入库|收货/, "receive", "Receiving is open.", "收货已打开。"],
+  [/\bag(e|ed|eing|ing)\b|old stock|unsold|attention|旧货|清货|卖不出/, "ageing", "Here is the ageing stock.", "这些是长期未卖的旧货。"],
+  [/reorder|replenish|restock|purchase|进货|补货/, "replenish", "Here are the reorder suggestions.", "这是补货建议。"],
+  [/\bdeals?\b|buyer|offer|买家/, "deals", "Here are the deals.", "这是销售跟进。"],
 ];
 
 function scoreSku(s: Sku, q: string) {
@@ -292,7 +293,7 @@ function locateReply(s: Sku) {
   return `Found ${s.sku} on Floor ${s.floor}, ${span}. ${s.onHand} on hand, ${s.reserved} reserved, ${available(s)} available.`;
 }
 
-function answer(q: string) {
+function answerOffline(q: string) {
   const s = getWare();
   const inv = getInventory();
   const selected = s.selected ? (inv.byCode.get(s.selected) ?? null) : null;
@@ -301,25 +302,19 @@ function answer(q: string) {
     return hit ? (inv.categories.find((c) => c.id === hit[1]) ?? null) : null;
   })();
 
-  if (/new arrival|what'?s new|newest|new model/.test(q)) {
-    const fresh = inv.newArrivals;
-    speak(
-      fresh.length
-        ? `${fresh.length} new ${fresh.length === 1 ? "model" : "models"}: ${fresh
-            .slice(0, 4)
-            .map((x) => `${x.model.name} ${x.variant}, ${x.onHand} on hand in ${inv.locationText(x).split(" · ").slice(0, 2).join(" ")}`)
-            .join("; ")}.`
-        : "No new models have been received yet.",
-    );
+  const command = COMMAND_WORDS.find(([re]) => re.test(q));
+  if (command) {
+    openCommand(command[1]);
+    speak(/[\u4e00-\u9fff]/.test(q) || s.lang === "zh" ? command[3] : command[2]);
     return;
   }
 
   if (/\b(move|transfer|relocate)\b/.test(q)) {
-    speak("I can preview a transfer, but moving stock needs an authorised confirmation in the receiving flow. Nothing has been changed.");
+    speak("Moving stock needs an authorised confirmation in the receiving flow. Nothing has been changed.");
     return;
   }
 
-  if (/low|reorder|running out/.test(q)) {
+  if (/low|running out|缺货/.test(q)) {
     const lows = inv.skus.filter((x) => (mentioned ? x.category === mentioned : x.floor === s.floor) && lowNow(x));
     const where = mentioned ? `${mentioned.name}` : `Floor ${s.floor}`;
     setWare({ selected: null, zone: null, zoomMul: 1 });
@@ -333,18 +328,18 @@ function answer(q: string) {
     return;
   }
 
-  if (/analy|today|change|report|summary/.test(q)) {
+  if (/analy|today|report|summary|今天/.test(q)) {
     const dayStart = new Date().setHours(0, 0, 0, 0);
     const today = (s.ledger?.movements ?? []).filter((m) => m.at >= dayStart);
     const sum = (kind: string) => today.filter((m) => m.kind === kind).reduce((a, m) => a + m.qty, 0);
     const pending = (s.ledger?.receipts ?? []).filter((r) => r.status === "needs_review").length;
     speak(
-      `Today: +${sum("receive")} received, −${sum("dispatch")} dispatched.${pending ? ` ${pending} delivery ${pending === 1 ? "note is" : "notes are"} still awaiting verification, so ${pending === 1 ? "its" : "their"} units are not in stock yet.` : ""}`,
+      `Today: +${sum("receive")} received, −${sum("dispatch")} dispatched.${pending ? ` ${pending} delivery ${pending === 1 ? "note is" : "notes are"} still awaiting verification.` : ""}`,
     );
     return;
   }
 
-  if (/how many|left|count|available/.test(q)) {
+  if (/how many|left|count|available|多少/.test(q)) {
     if (selected) {
       speak(
         `${selected.model.name} ${selected.variant}: ${selected.onHand} on hand, ${selected.reserved} reserved, ${available(selected)} available, ${selected.incoming} incoming.`,
@@ -355,7 +350,8 @@ function answer(q: string) {
     return;
   }
 
-  const ranked = inv.skus.map((x) => ({ x, score: scoreSku(x, q) }))
+  const ranked = inv.skus
+    .map((x) => ({ x, score: scoreSku(x, q) }))
     .filter((r) => r.score >= 2)
     .sort((a, b) => b.score - a.score);
   let hit = ranked[0]?.x ?? null;
@@ -364,6 +360,7 @@ function answer(q: string) {
     speak(`I found ${options.length} matches: ${options.map((r) => `${r.x.model.name} ${r.x.variant}`).join(", ")}. Which one?`);
     return;
   }
+  if (!hit && mentioned) hit = mentioned.skus[0] ?? null;
   if (!hit && /sofa/.test(q)) hit = inv.byCode.get(DEMO_SKU) ?? null;
 
   if (hit) {
@@ -375,22 +372,7 @@ function answer(q: string) {
     return;
   }
 
-  speak("I can locate a model, read its verified counts, list low-stock SKUs, list new arrivals or analyze today’s movements.");
-}
-
-/** Runs a spoken (or tapped) command. The agent never invents counts or changes stock silently. */
-export function runCommand(text: string) {
-  if (!text || getWare().orb === "thinking") return;
-  cancel(speakTimer);
-  cancel(stepTimer);
-  stopRec();
-  const q = text.toLowerCase();
-  setWare({ orb: "listening", agentOpen: true, panelOpen: false, interim: "" });
-  pushLine("user", `“${text}”`);
-  stepTimer = later(() => {
-    setWare({ orb: "thinking" });
-    stepTimer = later(() => answer(q), 900);
-  }, 600);
+  speak("Type slash for commands, or ask me where something is.");
 }
 
 // ── Stock ledger ──────────────────────────────────────────────────────────

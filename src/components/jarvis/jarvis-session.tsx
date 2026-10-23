@@ -4,11 +4,12 @@ import { Kicker, TotalsStrip, WarehouseIcon } from "@/components/common";
 import { JarvisOrb, OrbStatus } from "@/components/jarvis/orb";
 import { SkuThumb } from "@/components/sku-thumb";
 import { Button } from "@/components/ui/button";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { available, skuTitle } from "@/data/catalog";
 import { cn } from "@/lib/utils";
-import { useInventory, useWare } from "@/store";
+import { setWare, useInventory, useWare, type Lang } from "@/store";
 
-const SUGGESTIONS = ["Take me to the grey L-shaped sofa", "Show low-stock items", "What are the new arrivals?"];
+const SUGGESTIONS = ["What needs attention?", "有什么旧货？", "Get delivery quotes for the sofa deal"];
 
 /** Listening session — not a chatbot: no text input, no chat log. */
 export function JarvisSession({ drawer, className }: { drawer: boolean; className?: string }) {
@@ -17,6 +18,7 @@ export function JarvisSession({ drawer, className }: { drawer: boolean; classNam
   const interim = useWare((s) => s.interim);
   const micError = useWare((s) => s.micError);
   const transcript = useWare((s) => s.transcript);
+  const lang = useWare((s) => s.lang);
 
   const lastUser = transcript.filter((t) => t.who === "user").at(-1)?.text;
   const lastAi = transcript.filter((t) => t.who === "ai").at(-1)?.text ?? "";
@@ -29,8 +31,8 @@ export function JarvisSession({ drawer, className }: { drawer: boolean; classNam
           ? micError
           : voiceInputSupported()
             ? "Say a command…"
-            : "Voice input isn’t supported in this browser — tap a suggestion below."));
-  const reply = orb === "thinking" ? "Checking the verified ledger…" : lastAi;
+            : "No microphone — tap a suggestion below."));
+  const reply = orb === "thinking" ? "…" : lastAi;
 
   return (
     <aside
@@ -41,8 +43,26 @@ export function JarvisSession({ drawer, className }: { drawer: boolean; classNam
         className,
       )}
     >
-      <div className="flex items-center justify-between border-b border-border py-2.5 pr-2.5 pl-3.5">
+      <div className="flex items-center justify-between gap-2 border-b border-border py-2.5 pr-2.5 pl-3.5">
         <span className="text-[13.5px] font-semibold">Jarvis</span>
+        <ToggleGroup
+          type="single"
+          value={lang}
+          onValueChange={(v) => v && setWare({ lang: v as Lang })}
+          spacing={0.5}
+          className="ml-auto rounded-[7px] border border-border bg-inset p-[3px]"
+          aria-label="Language"
+        >
+          <ToggleGroupItem value="auto" variant="segment" size="segment">
+            Auto
+          </ToggleGroupItem>
+          <ToggleGroupItem value="en" variant="segment" size="segment">
+            EN
+          </ToggleGroupItem>
+          <ToggleGroupItem value="zh" variant="segment" size="segment">
+            {"中文"}
+          </ToggleGroupItem>
+        </ToggleGroup>
         <Button variant="quiet" size="icon-xs" onClick={closeAgent} aria-label="End session" className="size-[26px]">
           <XIcon />
         </Button>
