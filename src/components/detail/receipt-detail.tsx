@@ -11,31 +11,13 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Spinner } from "@/components/ui/spinner";
 import { run } from "@/convex";
 import { cn } from "@/lib/utils";
+import { shrink, uploadTo } from "@/scan";
 import { actorNow, useWare } from "@/store";
 import { DetailShell, Section } from "./detail-shell";
 import { History } from "./deal-detail";
 import { DictateButton } from "./dictate";
 
 type Line = Doc<"receipts">["lines"][number];
-
-/** Downscale photos before upload (long edge ≤ 1568 px). */
-async function shrink(file: File): Promise<Blob> {
-  if (!file.type.startsWith("image/")) return file;
-  const img = await createImageBitmap(file);
-  const k = Math.min(1, 1568 / Math.max(img.width, img.height));
-  if (k === 1) return file;
-  const c = document.createElement("canvas");
-  c.width = Math.round(img.width * k);
-  c.height = Math.round(img.height * k);
-  c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
-  return await new Promise((r) => c.toBlob((b) => r(b ?? file), "image/jpeg", 0.85));
-}
-
-export async function uploadTo(url: string, blob: Blob) {
-  const res = await fetch(url, { method: "POST", headers: { "Content-Type": blob.type || "application/octet-stream" }, body: blob });
-  const { storageId } = (await res.json()) as { storageId: Id<"_storage"> };
-  return storageId;
-}
 
 export function ReceiptDetail({ id }: { id: string }) {
   const r = useQuery(api.receiving.get, { receiptId: id as Id<"receipts"> });

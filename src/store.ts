@@ -14,8 +14,11 @@ export type Snapshot = NonNullable<FunctionReturnType<typeof api.ledger.snapshot
 export type Detail = { kind: "deal" | "receipt" | "batch"; id: string } | null;
 
 export interface TranscriptLine {
+  id: number;
   who: "ai" | "user";
   text: string;
+  /** What Jarvis did on screen for this reply ("Opened Ageing"). */
+  traces?: string[];
 }
 
 export interface Settings {
@@ -37,7 +40,10 @@ export interface WareState {
   role: Role;
   stage: Stage;
   detail: Detail;
-  paletteOpen: boolean;
+  /** Text to put in the Jarvis input (e.g. "/" from the keyboard shortcut), and a tick to focus it. */
+  chatDraft: string;
+  chatFocus: number;
+  /** Speech language hint; "auto" lets Fish detect English vs Mandarin. */
   lang: Lang;
 
   floor: FloorId;
@@ -60,6 +66,7 @@ export interface WareState {
   dragging: boolean;
 
   agentOpen: boolean;
+  /** Voice off: Jarvis neither listens nor speaks (typed chat only). */
   muted: boolean;
   interim: string;
   orb: OrbState;
@@ -110,7 +117,8 @@ export const useWare = create<WareState>()(() => ({
   role: readRole(),
   stage: "inventory",
   detail: null,
-  paletteOpen: false,
+  chatDraft: "",
+  chatFocus: 0,
   lang: "auto",
 
   floor: 1,
@@ -128,10 +136,10 @@ export const useWare = create<WareState>()(() => ({
   dragging: false,
 
   agentOpen: false,
-  muted: false,
+  muted: true,
   interim: "",
   orb: "idle",
-  transcript: [{ who: "ai", text: "Ready. Ask me where something is or how many are left." }],
+  transcript: [],
   micError: null,
 
   settings: readSettings(),
@@ -140,8 +148,9 @@ export const useWare = create<WareState>()(() => ({
 export const setWare = useWare.setState;
 export const getWare = useWare.getState;
 
+/** Switching role starts a fresh Jarvis conversation for that person. */
 export function setRole(role: Role) {
-  setWare({ role });
+  setWare({ role, transcript: [], detail: null, stage: "inventory" });
   try {
     localStorage.setItem(ROLE_KEY, role);
   } catch {

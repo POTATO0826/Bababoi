@@ -34,15 +34,17 @@ export const COMMANDS: Command[] = [
 
 export const commandsFor = (role: Role) => COMMANDS.filter((c) => c.roles.includes(role));
 
+export const commandById = (id: string) => COMMANDS.find((c) => c.id === id);
+
 /** Open a command's panel. Commands only navigate — they never approve, post or dispatch. */
 export function openCommand(id: CommandId) {
   const { detail } = getWare();
   // /delivery with a deal already open keeps that deal in view.
   const keep = id === "delivery" && detail?.kind === "deal" ? detail : null;
-  setWare({ stage: id, detail: keep, panelOpen: false, paletteOpen: false });
+  setWare({ stage: id, detail: keep, panelOpen: false });
 }
 
 /** Esc / done: back to just the map. */
 export function closePanel() {
-  setWare({ stage: "inventory", detail: null, paletteOpen: false });
+  setWare({ stage: "inventory", detail: null });
 }

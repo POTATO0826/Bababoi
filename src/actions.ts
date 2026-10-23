@@ -2,7 +2,7 @@
 import { toast } from "sonner";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
-import { closePanel, openCommand, type CommandId } from "@/commands";
+import { closePanel, commandById, openCommand, type CommandId } from "@/commands";
 import { convex, errorText, run } from "@/convex";
 import {
   CATEGORY_INFO,
@@ -19,6 +19,7 @@ import {
 import { baysNeeded, planBays, slotLabel } from "@/data/inventory";
 import { SLOT_BY_ID } from "@/data/layout";
 import { actorNow, getInventory, getWare, setWare, type ViewMode } from "@/store";
+import { scanToReceipt } from "@/scan";
 import { recordUtterance, say, stopSpeaking, transcribe } from "@/voice/voice";
 
 const timers = new Set<ReturnType<typeof setTimeout>>();
@@ -94,10 +95,7 @@ function focusSku(s: Sku) {
 }
 
 export function selectSku(s: Sku) {
-  switchFloor(s.floor, () => {
-    focusSku(s);
-    speak(`${s.model.name} ${s.variant} (${s.sku}): ${s.onHand} on hand, ${s.reserved} reserved, ${available(s)} available.`);
-  });
+  switchFloor(s.floor, () => focusSku(s));
 }
 
 /** Fly the map to a SKU (optionally a specific bay's floor) without opening the Details popup or speaking. */
@@ -126,45 +124,52 @@ export function toggleCategory(id: CategoryId) {
   switchFloor(first.floor, () => setWare({ openCat: id, zone: first.zone, zoomMul: 1, hoverBay: null }));
 }
 
-// ── Jarvis voice agent ────────────────────────────────────────────────────
-// listening → one utterance → thinking (Claude tools, or offline rules) → speaking (Fish, or the browser) → listening.
+// ── Jarvis (chat + voice) ─────────────────────────────────────────────────
+// One conversation for typing, "/" commands and voice. Voice on: listen → think → speak → listen.
 // Jarvis only reads, navigates, opens panels and requests quotes; people click approve / post / collect.
 
 let session = 0;
+let lineId = 0;
 let recording: { stop: () => void } | null = null;
 const forceOffline = typeof location !== "undefined" && new URLSearchParams(location.search).get("ai") === "0";
 
 export const voiceInputSupported = () => typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+const voiceOn = () => {
+  const s = getWare();
+  return s.agentOpen && !s.muted;
+};
 
-function pushLine(who: "ai" | "user", text: string) {
-  setWare((s) => ({ transcript: [...s.transcript, { who, text }].slice(-12) }));
+function pushLine(who: "ai" | "user", text: string, traces?: string[]) {
+  setWare((s) => ({ transcript: [...s.transcript, { id: ++lineId, who, text, ...(traces?.length ? { traces } : {}) }].slice(-40) }));
 }
 
-export function speak(text: string) {
+export function speak(text: string, traces?: string[]) {
   const my = session;
+  pushLine("ai", text, traces);
+  if (!voiceOn() || !getWare().settings.voiceReplies) {
+    setWare({ orb: voiceOn() ? "listening" : "idle" });
+    if (voiceOn()) void listen();
+    return;
+  }
   setWare({ orb: "speaking" });
-  pushLine("ai", text);
-  const done = () => {
+  void say(text, getWare().lang).then(() => {
     if (my !== session || getWare().orb !== "speaking") return;
-    setWare({ orb: getWare().agentOpen ? "listening" : "idle" });
+    setWare({ orb: voiceOn() ? "listening" : "idle" });
     void listen();
-  };
-  const { agentOpen, settings, lang } = getWare();
-  if (agentOpen && settings.voiceReplies) void say(text, lang).then(done);
-  else later(done, 2400);
+  });
 }
 
 async function listen() {
   const s = getWare();
-  if (!s.agentOpen || s.muted || s.orb !== "listening" || recording || !voiceInputSupported()) return;
+  if (!voiceOn() || s.orb !== "listening" || recording || !voiceInputSupported()) return;
   const my = session;
   const rec = recordUtterance({ lang: s.lang, maxMs: 12_000, silenceMs: 1100 });
   recording = rec;
   const u = await rec.done;
   recording = null;
-  if (my !== session || !getWare().agentOpen || getWare().muted) return;
+  if (my !== session || !voiceOn()) return;
   if (u.denied) {
-    setWare({ micError: "Microphone blocked — tap a suggestion below." });
+    setWare({ micError: "Microphone blocked", muted: true, orb: "idle" });
     return;
   }
   if (!u.blob && !u.browserText) {
@@ -174,8 +179,9 @@ async function listen() {
   setWare({ orb: "thinking", interim: "…" });
   const t = await transcribe(u, getWare().lang);
   if (my !== session) return;
+  setWare({ interim: "" });
   if (!t.text) {
-    setWare({ orb: "listening", interim: "" });
+    setWare({ orb: "listening" });
     later(() => void listen(), 200);
     return;
   }
@@ -187,78 +193,133 @@ function stopListening() {
   recording = null;
 }
 
-export function openAgent() {
-  if (getWare().agentOpen) return;
-  session++;
-  setWare({
+/** Open the Jarvis chat. `voice` starts listening; `draft` pre-fills the input (e.g. "/"). */
+export function openAgent(opts: { voice?: boolean; draft?: string } = {}) {
+  const voice = opts.voice ?? false;
+  setWare((s) => ({
     agentOpen: true,
     panelOpen: false,
-    orb: "listening",
-    interim: "",
     micError: null,
-    transcript: [{ who: "ai", text: "I’m listening." }],
-  });
-  void listen();
+    muted: !voice,
+    orb: voice ? "listening" : s.orb === "listening" ? "idle" : s.orb,
+    ...(opts.draft != null ? { chatDraft: opts.draft, chatFocus: s.chatFocus + 1 } : {}),
+  }));
+  if (voice) void listen();
 }
 
 export function closeAgent() {
   session++;
   stopListening();
   stopSpeaking();
-  setWare({ agentOpen: false, orb: "idle", interim: "" });
+  setWare({ agentOpen: false, orb: "idle", interim: "", muted: true });
 }
 
+/** Mic button: voice on (listen + spoken replies) or off (typing only). */
 export function toggleMute() {
   const muted = !getWare().muted;
-  setWare({ muted });
-  if (muted) stopListening();
-  else if (getWare().orb === "listening") void listen();
+  setWare({ muted, micError: null });
+  if (muted) {
+    session++;
+    stopListening();
+    stopSpeaking();
+    setWare({ orb: "idle", interim: "" });
+  } else {
+    setWare({ orb: "listening" });
+    void listen();
+  }
 }
 
 type JarvisReply = FunctionReturnType<typeof api.ai.jarvisAsk>;
 
-function applyEffects(effects: JarvisReply["effects"]) {
+/** Apply what Jarvis asked the screen to do; returns the lines shown under its reply. */
+function applyEffects(effects: JarvisReply["effects"]): string[] {
+  const traces: string[] = [];
   for (const e of effects) {
     if (e.type === "run_command") {
-      if (e.command === "close") closePanel();
-      else openCommand(e.command);
+      if (e.command === "close") {
+        closePanel();
+        traces.push("Back to the map");
+      } else {
+        openCommand(e.command);
+        traces.push(`Opened ${commandById(e.command)?.label ?? e.command}`);
+      }
     } else if (e.type === "open_deal") {
       setWare({ detail: { kind: "deal", id: e.deal_id } });
       showOnMap(e.sku_code);
-    } else if (e.type === "show_on_map") showOnMap(e.sku_code);
+      traces.push("Opened the deal");
+    } else if (e.type === "show_on_map") {
+      showOnMap(e.sku_code);
+      traces.push(`Map → ${e.sku_code}`);
+    }
   }
+  return [...new Set(traces)];
 }
 
-/** Runs a spoken (or tapped) request. Claude first; offline keyword rules if it is unavailable. */
+/** "/ageing" etc. typed in the chat: open the panel directly, no AI needed. */
+function slashCommand(text: string) {
+  const id = text.slice(1).trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+  if (id === "close" || id === "map") {
+    closePanel();
+    speak("Back to the map.", ["Back to the map"]);
+    return;
+  }
+  const cmd = commandById(id);
+  if (!cmd || !cmd.roles.includes(getWare().role)) {
+    speak(`No ${text.split(/\s+/)[0]} command for you.`);
+    return;
+  }
+  openCommand(cmd.id);
+  speak(`${cmd.label} is open.`, [`Opened ${cmd.label}`]);
+}
+
+/** Scanner in the chat: a delivery-note photo / PDF becomes a receipt that AI reads for staff to verify. */
+export async function scanNote(file: File) {
+  ++session;
+  pushLine("user", file.type === "application/pdf" ? `Scanned ${file.name}` : "Scanned a delivery note");
+  setWare({ orb: "thinking" });
+  const r = await scanToReceipt(file);
+  if (!r.ok) {
+    speak(r.error);
+    return;
+  }
+  speak("Reading the note now. Check the lines, count the goods, then post.", ["Created a receipt", "Opened Receive"]);
+}
+
+/** Runs a typed, tapped or spoken request. Claude first; offline keyword rules if it is unavailable. */
 export async function runCommand(text: string) {
-  if (!text.trim()) return;
+  const t = text.trim();
+  if (!t) return;
   const my = ++session;
   stopListening();
   stopSpeaking();
-  setWare({ orb: "thinking", agentOpen: true, interim: "" });
-  pushLine("user", `“${text}”`);
+  setWare({ agentOpen: true, interim: "" });
+  pushLine("user", t);
+  if (t.startsWith("/")) {
+    slashCommand(t);
+    return;
+  }
+  setWare({ orb: "thinking" });
   if (!forceOffline) {
     const s = getWare();
     try {
       const r = await Promise.race([
         convex.action(api.ai.jarvisAsk, {
           actor: actorNow(),
-          text,
+          text: t,
           context: { stage: s.stage, selected: s.selected, dealId: s.detail?.kind === "deal" ? s.detail.id : null },
         }),
         new Promise<null>((res) => setTimeout(() => res(null), 25_000)),
       ]);
       if (my !== session) return;
       if (r && !r.unavailable) {
-        applyEffects(r.effects);
-        speak(r.reply || "Done.");
+        speak(r.reply || "Done.", applyEffects(r.effects));
         return;
       }
     } catch {
       // fall through to offline rules
     }
   }
-  if (my === session) answerOffline(text.toLowerCase());
+  if (my === session) answerOffline(t.toLowerCase());
 }
 
 const CATEGORY_WORDS: [RegExp, CategoryId][] = [
@@ -305,7 +366,7 @@ function answerOffline(q: string) {
   const command = COMMAND_WORDS.find(([re]) => re.test(q));
   if (command) {
     openCommand(command[1]);
-    speak(/[\u4e00-\u9fff]/.test(q) || s.lang === "zh" ? command[3] : command[2]);
+    speak(/[\u4e00-\u9fff]/.test(q) ? command[3] : command[2], [`Opened ${commandById(command[1])?.label}`]);
     return;
   }
 
@@ -367,12 +428,12 @@ function answerOffline(q: string) {
     const target = hit;
     switchFloor(target.floor, () => {
       focusSku(target);
-      speak(locateReply(target));
+      speak(locateReply(target), [`Map → ${target.sku}`]);
     });
     return;
   }
 
-  speak("Type slash for commands, or ask me where something is.");
+  speak("Type / for commands, or ask me where something is.");
 }
 
 // ── Stock ledger ──────────────────────────────────────────────────────────

@@ -239,6 +239,13 @@ When the user asks for something a panel shows, call run_command to open it and 
 You cannot approve, reject, post receipts, confirm collection, create purchase orders or book deliveries. If asked, say a person must click it, and open the right panel with run_command.
 Delivery quotes: say the source ("Lalamove sandbox", "carrier", "saved demo"), the total in ringgit, and when it expires. Sandbox prices are test prices, not confirmed. If a cost such as unloading is unknown, say it is unknown.`;
 
+/** What each role mostly needs from Jarvis. Sent per request so the system prompt stays cacheable. */
+const ROLE_FOCUS = {
+  owner: "They are the owner: approvals, ageing stock, reorders and net recovery matter most.",
+  sales: "They are the salesperson: selling ageing stock, buyer details, delivery quotes and sending deals to the owner matter most.",
+  warehouse: "They are the warehouse worker: verifying delivery notes, where stock sits, and confirming collections matter most.",
+} as const;
+
 export const jarvisAsk = action({
   args: {
     actor: v.object({ role: v.union(v.literal("owner"), v.literal("sales"), v.literal("warehouse")), name: v.string() }),
@@ -283,7 +290,7 @@ export const jarvisAsk = action({
     const messages: Anthropic.Beta.BetaMessageParam[] = [
       {
         role: "user",
-        content: `[Screen: panel=${context.stage}${context.selected ? `, selected SKU ${context.selected}` : ""}${context.dealId ? ", a deal is open" : ""}. User role: ${actor.role} (${actor.name}).]\n${text}`,
+        content: `[Screen: panel=${context.stage}${context.selected ? `, selected SKU ${context.selected}` : ""}${context.dealId ? ", a deal is open" : ""}. User: ${actor.name}. ${ROLE_FOCUS[actor.role]}]\n${text}`,
       },
     ];
     const started = Date.now();
