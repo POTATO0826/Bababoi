@@ -5,11 +5,10 @@ import { DetailsPanel } from "@/components/viewport/details-panel";
 import { dragState } from "@/interaction";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { skusOnFloor, totals, zoneCategory, type FloorId } from "@/data/catalog";
-import { BAYS } from "@/data/layout";
+import { totals, type FloorId } from "@/data/catalog";
 import { useElementSize } from "@/hooks/use-layout";
 import { cn } from "@/lib/utils";
-import { getWare, setWare, useWare, type ViewMode } from "@/store";
+import { getWare, setWare, useInventory, useWare, type ViewMode } from "@/store";
 
 const WarehouseCanvas = lazy(() => import("@/scene/warehouse-canvas"));
 
@@ -132,7 +131,8 @@ function Hud({ tight, veryTight }: { tight: boolean; veryTight: boolean }) {
   const zone = useWare((s) => s.zone);
   const view = useWare((s) => s.view);
   const panelOpen = useWare((s) => s.panelOpen);
-  const zc = zone ? zoneCategory(floor, zone) : null;
+  const inv = useInventory();
+  const zc = zone ? inv.zoneCategory(floor, zone) : null;
   const stop = (e: ReactPointerEvent) => e.stopPropagation();
 
   return (
@@ -246,9 +246,10 @@ function Segmented<T extends string | number>({
 
 function Legend({ showStats }: { showStats: boolean }) {
   const floor = useWare((s) => s.floor);
-  const bays = BAYS[floor];
+  const inv = useInventory();
+  const bays = inv.bays[floor];
   const occupied = bays.filter((b) => b.sku).length;
-  const units = totals(skusOnFloor(floor)).onHand;
+  const units = totals(inv.skusOnFloor(floor)).onHand;
   const items: [string, string][] = [
     ["In stock", "bg-[#3a3a42]"],
     ["Low stock", "bg-warn"],

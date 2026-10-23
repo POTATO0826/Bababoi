@@ -1,7 +1,11 @@
+import { useEffect } from "react";
+import { resumePendingIcons } from "@/actions";
 import { Header } from "@/components/header";
 import { InventoryColumn } from "@/components/inventory/inventory-column";
+import { ReceiveDialog } from "@/components/inventory/receive-dialog";
 import { JarvisSession } from "@/components/jarvis/jarvis-session";
 import { Viewport } from "@/components/viewport/viewport";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useLayoutTier } from "@/hooks/use-layout";
 import { cn } from "@/lib/utils";
@@ -21,6 +25,9 @@ export function App() {
   const drawer = tier === "narrow" || tier === "stacked";
   const fixedRows = tier === "wide" || tier === "mid";
   const cols = COLUMNS[tier];
+
+  // Icons that were still generating when the page closed.
+  useEffect(resumePendingIcons, []);
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -43,6 +50,8 @@ export function App() {
           {agentOpen && <JarvisSession drawer={drawer} />}
         </div>
       </div>
+      <ReceiveDialog />
+      <Toaster position="bottom-right" theme="dark" />
     </TooltipProvider>
   );
 }

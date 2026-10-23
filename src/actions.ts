@@ -1,21 +1,24 @@
 // Composite actions shared by the inventory list, the 3D scene and the Jarvis voice agent.
+import { toast } from "sonner";
 import {
-  CATEGORIES,
+  CATEGORY_INFO,
   DEMO_SKU,
   PENDING_NOTE,
-  SKUS,
-  SKU_BY_CODE,
   available,
   isLow,
-  zoneCategory,
+  skuTitle,
   type Category,
   type CategoryId,
   type FloorId,
+  type Movement,
+  type ShapeOption,
   type Sku,
+  type SkuRecord,
   type ZoneId,
 } from "@/data/catalog";
-import { codesFor } from "@/data/layout";
-import { getWare, setWare, type ViewMode } from "@/store";
+import { baysNeeded, planBays, slotLabel } from "@/data/inventory";
+import { SLOT_BY_ID } from "@/data/layout";
+import { getInventory, getWare, setWare, type ViewMode } from "@/store";
 
 const timers = new Set<ReturnType<typeof setTimeout>>();
 function later(fn: () => void, ms: number) {
@@ -52,7 +55,7 @@ export function switchFloor(floor: FloorId, after?: () => void) {
 }
 
 export function zoomZone(zone: ZoneId) {
-  const cat = zoneCategory(getWare().floor, zone);
+  const cat = getInventory().zoneCategory(getWare().floor, zone);
   setWare((s) => ({ zone, zoomMul: 1, hoverBay: null, openCat: cat ? cat.id : s.openCat }));
 }
 
@@ -104,7 +107,11 @@ export function toggleCategory(id: CategoryId) {
     setWare({ openCat: null });
     return;
   }
-  const first = CATEGORIES.find((c) => c.id === id)!.skus[0]!;
+  const first = getInventory().categories.find((c) => c.id === id)?.skus[0];
+  if (!first) {
+    setWare({ openCat: id });
+    return;
+  }
   switchFloor(first.floor, () => setWare({ openCat: id, zone: first.zone, zoomMul: 1, hoverBay: null }));
 }
 
@@ -272,18 +279,32 @@ function scoreSku(s: Sku, q: string) {
 }
 
 function locateReply(s: Sku) {
-  const codes = codesFor(s);
+  const codes = getInventory().codesFor(s);
   const span = codes.length > 1 ? `bays ${codes[0]!.code} to ${codes[codes.length - 1]!.code}` : `bay ${codes[0]?.code ?? "—"}`;
   return `Found ${s.sku} on Floor ${s.floor}, ${span}. ${s.onHand} on hand, ${s.reserved} reserved, ${available(s)} available.`;
 }
 
 function answer(q: string) {
   const s = getWare();
-  const selected = s.selected ? SKU_BY_CODE.get(s.selected) ?? null : null;
+  const inv = getInventory();
+  const selected = s.selected ? (inv.byCode.get(s.selected) ?? null) : null;
   const mentioned: Category | null = (() => {
     const hit = CATEGORY_WORDS.find(([re]) => re.test(q));
-    return hit ? CATEGORIES.find((c) => c.id === hit[1])! : null;
+    return hit ? (inv.categories.find((c) => c.id === hit[1]) ?? null) : null;
   })();
+
+  if (/new arrival|what'?s new|newest|new model/.test(q)) {
+    const fresh = inv.newArrivals;
+    speak(
+      fresh.length
+        ? `${fresh.length} new ${fresh.length === 1 ? "model" : "models"}: ${fresh
+            .slice(0, 4)
+            .map((x) => `${x.model.name} ${x.variant}, ${x.onHand} on hand in ${inv.locationText(x).split(" · ").slice(0, 2).join(" ")}`)
+            .join("; ")}.`
+        : "No new models have been received yet.",
+    );
+    return;
+  }
 
   if (/\b(move|transfer|relocate)\b/.test(q)) {
     speak("I can preview a transfer, but moving stock needs an authorised confirmation in the receiving flow. Nothing has been changed.");
@@ -291,7 +312,7 @@ function answer(q: string) {
   }
 
   if (/low|reorder|running out/.test(q)) {
-    const lows = SKUS.filter((x) => (mentioned ? x.category === mentioned : x.floor === s.floor) && lowNow(x));
+    const lows = inv.skus.filter((x) => (mentioned ? x.category === mentioned : x.floor === s.floor) && lowNow(x));
     const where = mentioned ? `${mentioned.name}` : `Floor ${s.floor}`;
     setWare({ selected: null, zone: null, zoomMul: 1 });
     speak(
@@ -322,7 +343,7 @@ function answer(q: string) {
     return;
   }
 
-  const ranked = SKUS.map((x) => ({ x, score: scoreSku(x, q) }))
+  const ranked = inv.skus.map((x) => ({ x, score: scoreSku(x, q) }))
     .filter((r) => r.score >= 2)
     .sort((a, b) => b.score - a.score);
   let hit = ranked[0]?.x ?? null;
@@ -331,7 +352,7 @@ function answer(q: string) {
     speak(`I found ${options.length} matches: ${options.map((r) => `${r.x.model.name} ${r.x.variant}`).join(", ")}. Which one?`);
     return;
   }
-  if (!hit && /sofa/.test(q)) hit = SKU_BY_CODE.get(DEMO_SKU) ?? null;
+  if (!hit && /sofa/.test(q)) hit = inv.byCode.get(DEMO_SKU) ?? null;
 
   if (hit) {
     const target = hit;
@@ -342,7 +363,7 @@ function answer(q: string) {
     return;
   }
 
-  speak("I can locate a model, read its verified counts, list low-stock SKUs or analyze today’s movements.");
+  speak("I can locate a model, read its verified counts, list low-stock SKUs, list new arrivals or analyze today’s movements.");
 }
 
 /** Runs a spoken (or tapped) command. The agent never invents counts or changes stock silently. */
@@ -358,4 +379,178 @@ export function runCommand(text: string) {
     setWare({ orb: "thinking" });
     stepTimer = later(() => answer(q), 900);
   }, 600);
+}
+
+// ── Stock ledger: new models, movements, out-of-stock removal ─────────────
+// People confirm every change (the AI never edits stock); each change is logged on the SKU.
+
+const nowLabel = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+
+function updateRecord(code: string, fn: (r: SkuRecord) => SkuRecord | null) {
+  setWare((st) => ({
+    skus: st.skus.flatMap((r) => {
+      if (r.sku !== code) return [r];
+      const next = fn(r);
+      return next ? [next] : [];
+    }),
+  }));
+}
+
+/** Floor/zone of a record follow its first bay. */
+function withBays(r: SkuRecord, bays: string[]): SkuRecord {
+  const first = SLOT_BY_ID.get(bays[0] ?? "");
+  return first ? { ...r, bays, floor: first.floor, zone: first.zone } : { ...r, bays };
+}
+
+const logMovement = (r: SkuRecord, m: Omit<Movement, "t">): Movement[] => [{ t: nowLabel(), ...m }, ...(r.movements ?? [])].slice(0, 12);
+
+export interface NewModelInput {
+  category: CategoryId;
+  shape: ShapeOption;
+  model: string;
+  variant: string;
+  color: string;
+  sku: string;
+  onHand: number;
+  incoming: number;
+}
+
+export function skuPrefix(category: CategoryId, shape: ShapeOption) {
+  return shape.prefix ?? CATEGORY_INFO.find((c) => c.id === category)!.prefix;
+}
+
+export function capFor(category: CategoryId, shape: ShapeOption) {
+  return shape.cap ?? CATEGORY_INFO.find((c) => c.id === category)!.cap;
+}
+
+/** Where a delivery would go right now (free bays, preferring the category's zones). */
+export function previewPlacement(category: CategoryId, shape: ShapeOption, units: number) {
+  const records = getWare().skus;
+  const need = baysNeeded(units, capFor(category, shape));
+  const bays = planBays(records, category, need);
+  return { need, bays, label: slotLabel(bays), fits: bays.length >= need };
+}
+
+export function receiveNewModel(input: NewModelInput): { ok: true } | { ok: false; error: string } {
+  const st = getWare();
+  const code = input.sku.trim().toUpperCase();
+  if (st.skus.some((r) => r.sku === code && r.onHand > 0)) return { ok: false, error: `${code} already exists.` };
+  const cap = capFor(input.category, input.shape);
+  const place = previewPlacement(input.category, input.shape, input.onHand);
+  if (!place.fits) {
+    return { ok: false, error: `Not enough free bays: needs ${place.need}, ${place.bays.length} free.` };
+  }
+  const record = withBays(
+    {
+      sku: code,
+      variant: input.variant.trim(),
+      color: input.color,
+      floor: 1,
+      zone: "A",
+      onHand: input.onHand,
+      reserved: 0,
+      incoming: input.incoming,
+      category: input.category,
+      model: input.model.trim(),
+      kind: input.shape.kind,
+      cap,
+      doors: input.shape.doors ?? 2,
+      bays: [],
+      addedAt: Date.now(),
+      iconStatus: "pending",
+      movements: [{ t: nowLabel(), text: "Received · new model", d: `+${input.onHand}` }],
+    },
+    place.bays,
+  );
+  // Drop any earlier out-of-stock row with the same code, then add.
+  setWare((s) => ({ skus: [...s.skus.filter((r) => r.sku !== code), record], query: "", receiveOpen: false }));
+
+  const sku = getInventory().byCode.get(code)!;
+  toast.success(`${skuTitle(sku)} added`, { description: `${input.onHand} units placed at ${place.label}` });
+  selectSku(sku);
+  void requestIcon(code);
+  return { ok: true };
+}
+
+/** Ask the server to have Claude draw an icon for the model. Falls back to the swatch when unavailable. */
+export async function requestIcon(code: string) {
+  const r = getWare().skus.find((x) => x.sku === code);
+  if (!r) return;
+  updateRecord(code, (x) => ({ ...x, iconStatus: "pending" }));
+  const category = CATEGORY_INFO.find((c) => c.id === r.category)!.name;
+  try {
+    const res = await fetch("/api/icon", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: r.model, variant: r.variant, category, color: r.color, kind: r.kind }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { svg?: string; error?: string };
+    if (res.ok && data.svg) {
+      updateRecord(code, (x) => ({ ...x, icon: data.svg, iconStatus: "ready" }));
+    } else {
+      updateRecord(code, (x) => ({ ...x, iconStatus: res.status === 501 ? "unavailable" : "failed" }));
+      if (res.status !== 501) toast.error("Couldn’t generate the icon", { description: data.error ?? `HTTP ${res.status}` });
+    }
+  } catch {
+    updateRecord(code, (x) => ({ ...x, iconStatus: "failed" }));
+  }
+}
+
+let resumed = false;
+/** Retry icons that were mid-generation when the page was closed (once per page load). */
+export function resumePendingIcons() {
+  if (resumed) return;
+  resumed = true;
+  for (const r of getWare().skus) if (r.iconStatus === "pending") void requestIcon(r.sku);
+}
+
+/** Dispatch (stock leaves) or receive (stock arrives) units of an existing SKU. */
+export function recordMovement(code: string, type: "dispatch" | "receive", qty: number): { ok: true } | { ok: false; error: string } {
+  const st = getWare();
+  const r = st.skus.find((x) => x.sku === code);
+  if (!r || qty <= 0) return { ok: false, error: "Nothing to record." };
+
+  if (type === "dispatch") {
+    if (qty > r.onHand) return { ok: false, error: `Only ${r.onHand} on hand.` };
+    const onHand = r.onHand - qty;
+    if (onHand === 0) {
+      removeOutOfStock(r);
+      return { ok: true };
+    }
+    updateRecord(code, (x) => ({
+      ...withBays(x, x.bays.slice(0, baysNeeded(onHand, x.cap))),
+      onHand,
+      reserved: x.reserved - Math.min(qty, x.reserved), // dispatch fulfils bookings first
+      movements: logMovement(x, { text: "Dispatched · confirmed by J. Lim", d: `−${qty}` }),
+    }));
+    toast(`Dispatched ${qty} × ${r.model} · ${r.variant}`, { description: `${onHand} left on hand` });
+    return { ok: true };
+  }
+
+  const onHand = r.onHand + qty;
+  const extra = baysNeeded(onHand, r.cap) - r.bays.length;
+  const added = extra > 0 ? planBays(st.skus, r.category, extra, { floor: r.floor, zone: r.zone }) : [];
+  if (added.length < extra) return { ok: false, error: `No free bay for ${qty} more units (${added.length} of ${extra} bays free).` };
+  updateRecord(code, (x) => ({
+    ...withBays(x, [...x.bays, ...added]),
+    onHand,
+    incoming: x.incoming - Math.min(qty, x.incoming), // receiving fulfils open orders first
+    movements: logMovement(x, { text: "Received · count confirmed by J. Lim", d: `+${qty}` }),
+  }));
+  toast.success(`Received ${qty} × ${r.model} · ${r.variant}`, { description: `${onHand} on hand` });
+  return { ok: true };
+}
+
+/** Out of stock: the SKU, its icon and its 3D units leave the map and the list; its bays become free. */
+function removeOutOfStock(r: SkuRecord) {
+  const st = getWare();
+  const wasSelected = st.selected === r.sku;
+  setWare((s) => ({
+    skus: s.skus.filter((x) => x.sku !== r.sku),
+    ...(wasSelected ? { selected: null, panelOpen: false } : {}),
+    hoverBay: null,
+  }));
+  toast(`${r.model} · ${r.variant} is out of stock`, {
+    description: `Removed from the list and the map · ${r.bays.length} ${r.bays.length === 1 ? "bay" : "bays"} freed`,
+  });
 }

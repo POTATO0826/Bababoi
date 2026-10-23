@@ -4,6 +4,7 @@ import { useState } from "react";
 import * as THREE from "three";
 import { FLOOR_D, FLOOR_W } from "@/data/layout";
 import { useWare } from "@/store";
+import { ArrivalPins } from "./arrival-pins";
 import { BaysLayer } from "./bays";
 import { CameraRig } from "./camera-rig";
 import { FurnitureLayer } from "./furniture/furniture-layer";
@@ -71,6 +72,7 @@ export default function WarehouseCanvas() {
       <Structure floor={floor} />
       <BaysLayer floor={floor} />
       <FurnitureLayer floor={floor} />
+      <ArrivalPins floor={floor} />
     </Canvas>
   );
 }

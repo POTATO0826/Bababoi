@@ -149,6 +149,42 @@ const SEED: CategorySeed[] = [
   },
 ];
 
+/** One stock movement recorded in this session (newest first in `SkuRecord.movements`). */
+export interface Movement {
+  t: string;
+  text: string;
+  d: string;
+}
+
+/**
+ * The persisted stock ledger row. Everything else (categories, models, bay contents)
+ * is derived from the list of records — see `deriveInventory` in ./inventory.
+ */
+export interface SkuRecord {
+  sku: string;
+  variant: string;
+  color: string;
+  floor: FloorId;
+  zone: ZoneId;
+  onHand: number;
+  reserved: number;
+  incoming: number;
+  category: CategoryId;
+  model: string;
+  kind: FurnitureKind;
+  /** Max units stored per bay. */
+  cap: number;
+  doors: number;
+  /** Bay ids allocated to this SKU, in fill order. */
+  bays: string[];
+  /** Set on models received through the "New arrivals" flow. */
+  addedAt?: number;
+  /** AI-generated SVG icon markup. */
+  icon?: string;
+  iconStatus?: "pending" | "ready" | "failed" | "unavailable";
+  movements?: Movement[];
+}
+
 export interface Category {
   id: CategoryId;
   name: string;
@@ -163,36 +199,95 @@ export interface Model {
   skus: Sku[];
 }
 
-export interface Sku extends SkuSeed {
+export interface Sku extends Omit<SkuRecord, "category" | "model"> {
   category: Category;
   model: Model;
-  kind: FurnitureKind;
-  /** Max units stored per bay. */
+}
+
+export interface CategoryInfo {
+  id: CategoryId;
+  name: string;
   cap: number;
+  /** SKU prefix for new models (general stock uses the shape's prefix). */
+  prefix: string;
 }
 
-function build(): { categories: Category[]; skus: Sku[] } {
-  const categories: Category[] = [];
-  const skus: Sku[] = [];
-  for (const c of SEED) {
-    const category: Category = { id: c.id, name: c.name, models: [], skus: [] };
-    for (const m of c.models) {
-      const model: Model = { name: m.name, category, doors: m.doors ?? 2, skus: [] };
-      for (const s of m.skus) {
-        const sku: Sku = { ...s, category, model, kind: m.kind ?? c.kind, cap: m.cap ?? c.cap };
-        model.skus.push(sku);
-        category.skus.push(sku);
-        skus.push(sku);
-      }
-      category.models.push(model);
-    }
-    categories.push(category);
-  }
-  return { categories, skus };
+export const CATEGORY_INFO: readonly CategoryInfo[] = SEED.map((c) => ({
+  id: c.id,
+  name: c.name,
+  cap: c.cap,
+  prefix: { sofas: "SOFA", tables: "TABLE", chairs: "CHAIR", wardrobes: "WARD", beds: "BED", general: "GEN" }[c.id],
+}));
+
+export interface ShapeOption {
+  value: string;
+  label: string;
+  kind: FurnitureKind;
+  doors?: number;
+  cap?: number;
+  prefix?: string;
 }
 
-export const { categories: CATEGORIES, skus: SKUS } = build();
-export const SKU_BY_CODE = new Map(SKUS.map((s) => [s.sku, s]));
+/** 3D shapes a new model can use, per category. */
+export const SHAPES: Record<CategoryId, ShapeOption[]> = {
+  sofas: [
+    { value: "sofa", label: "3-seater sofa", kind: "sofa" },
+    { value: "sofaL", label: "L-shaped sofa", kind: "sofaL", cap: 2 },
+    { value: "recliner", label: "Recliner sofa", kind: "recliner" },
+  ],
+  tables: [
+    { value: "table", label: "Dining table", kind: "table" },
+    { value: "tableRound", label: "Round table", kind: "tableRound" },
+    { value: "coffee", label: "Coffee table", kind: "coffee" },
+    { value: "side", label: "Side table", kind: "side" },
+    { value: "console", label: "Console table", kind: "console" },
+    { value: "desk", label: "Desk", kind: "desk" },
+    { value: "glass", label: "Glass-top table", kind: "glass" },
+  ],
+  chairs: [
+    { value: "chair", label: "Dining chair", kind: "chair" },
+    { value: "stool", label: "Bar stool", kind: "stool" },
+    { value: "armchair", label: "Armchair", kind: "armchair" },
+    { value: "office", label: "Office chair", kind: "office" },
+    { value: "lounge", label: "Lounge chair", kind: "lounge" },
+    { value: "rocking", label: "Rocking chair", kind: "rocking" },
+    { value: "kids", label: "Kids chair", kind: "kids" },
+  ],
+  wardrobes: [
+    { value: "wardrobe-2", label: "2-door wardrobe", kind: "wardrobe", doors: 2 },
+    { value: "wardrobe-3", label: "3-door wardrobe", kind: "wardrobe", doors: 3 },
+    { value: "cabinet", label: "Cabinet", kind: "cabinet" },
+  ],
+  beds: [
+    { value: "bed", label: "Double bed", kind: "bed" },
+    { value: "bedSingle", label: "Single bed", kind: "bedSingle" },
+    { value: "bunk", label: "Bunk bed", kind: "bunk" },
+    { value: "daybed", label: "Day bed", kind: "daybed" },
+  ],
+  general: [
+    { value: "carton", label: "Boxed goods", kind: "carton", prefix: "GOODS" },
+    { value: "mattress", label: "Mattress", kind: "mattress", prefix: "MATT" },
+    { value: "rug", label: "Rug", kind: "rug", prefix: "RUG" },
+    { value: "lamp", label: "Floor lamp", kind: "lamp", prefix: "LAMP" },
+    { value: "mirror", label: "Mirror", kind: "mirror", prefix: "MIRR" },
+  ],
+};
+
+/** Seed rows without bay allocation (allocation lives in ./inventory). */
+export function seedRows(): Omit<SkuRecord, "bays">[] {
+  return SEED.flatMap((c) =>
+    c.models.flatMap((m) =>
+      m.skus.map((s) => ({
+        ...s,
+        category: c.id,
+        model: m.name,
+        kind: m.kind ?? c.kind,
+        cap: m.cap ?? c.cap,
+        doors: m.doors ?? 2,
+      })),
+    ),
+  );
+}
 
 export const DEMO_SKU = "SOFA-HAVN-2140";
 
@@ -222,24 +317,11 @@ export function totals(list: readonly Sku[]): Totals {
   return t;
 }
 
-export const skusOnFloor = (floor: FloorId) => SKUS.filter((s) => s.floor === floor);
-
-/** The category stored in a zone (each zone holds one category per floor). */
-export function zoneCategory(floor: FloorId, zone: ZoneId): Category | null {
-  return SKUS.find((s) => s.floor === floor && s.zone === zone)?.category ?? null;
-}
-
 export function matchesQuery(s: Sku, q: string) {
   return `${s.sku} ${s.model.name} ${s.variant} ${s.category.name}`.toLowerCase().includes(q);
 }
 
-interface HistoryRow {
-  t: string;
-  text: string;
-  d: string;
-}
-
-const HISTORY: Record<string, HistoryRow[]> = {
+const HISTORY: Record<string, Movement[]> = {
   "SOFA-HAVN-2140": [
     { t: "09:12", text: "Received · DN-2291", d: "+4" },
     { t: "Yesterday", text: "Reserved · Booking B-1180", d: "−2" },
@@ -247,12 +329,14 @@ const HISTORY: Record<string, HistoryRow[]> = {
   ],
 };
 
-export function historyFor(s: Sku): HistoryRow[] {
-  return (
-    HISTORY[s.sku] ?? [
-      { t: "Today", text: `Reserved · Booking B-${1100 + s.onHand * 7}`, d: `−${Math.min(s.reserved, 2)}` },
-      { t: "Tue", text: `Received · DN-${2200 + s.onHand * 3}`, d: `+${Math.min(s.onHand, s.cap)}` },
-      { t: "Last week", text: "Count verified · J. Lim", d: "0" },
-    ]
-  );
+/** Movements recorded in this session first, then the seed history. */
+export function historyFor(s: Sku): Movement[] {
+  const seed = s.addedAt
+    ? []
+    : (HISTORY[s.sku] ?? [
+        { t: "Today", text: `Reserved · Booking B-${1100 + s.onHand * 7}`, d: `−${Math.min(s.reserved, 2)}` },
+        { t: "Tue", text: `Received · DN-${2200 + s.onHand * 3}`, d: `+${Math.min(s.onHand, s.cap)}` },
+        { t: "Last week", text: "Count verified · J. Lim", d: "0" },
+      ]);
+  return [...(s.movements ?? []), ...seed].slice(0, 5);
 }

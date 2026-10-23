@@ -1,41 +1,29 @@
 import { SearchIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import { selectSku, switchFloor, toggleCategory } from "@/actions";
-import { CardHeading, CategoryIcon, StatTiles, Swatch, TotalsStrip } from "@/components/common";
+import { CardHeading, CategoryIcon, StatTiles, TotalsStrip } from "@/components/common";
+import { NewArrivals } from "@/components/inventory/new-arrivals";
+import { SkuThumb } from "@/components/sku-thumb";
 import { JarvisDock } from "@/components/jarvis/jarvis-dock";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  CATEGORIES,
-  SKUS,
-  available,
-  isLow,
-  matchesQuery,
-  skuTitle,
-  skusOnFloor,
-  totals,
-  zoneCategory,
-  type Category,
-  type FloorId,
-  type Sku,
-} from "@/data/catalog";
-import { locationText } from "@/data/layout";
+import { available, isLow, matchesQuery, skuTitle, totals, type Category, type Sku } from "@/data/catalog";
+import { deriveInventory } from "@/data/inventory";
 import { cn } from "@/lib/utils";
-import { setWare, useWare } from "@/store";
-
-const TOTAL_UNITS = SKUS.reduce((a, s) => a + s.onHand, 0);
+import { setWare, useInventory, useWare } from "@/store";
 
 export function InventoryColumn({ wide, className }: { wide: boolean; className?: string }) {
   const query = useWare((s) => s.query);
   const q = query.trim().toLowerCase();
+  const totalUnits = useInventory().skus.reduce((a, s) => a + s.onHand, 0);
 
   return (
     <aside className={cn("flex min-h-0 flex-col gap-3", className)}>
       <div className="flex flex-col gap-2.5 px-0.5 pt-0.5">
         <div className="flex items-baseline justify-between">
           <h1 className="text-[17px] font-semibold tracking-[-.01em]">Inventory</h1>
-          <span className="font-mono text-xs text-muted-foreground">{TOTAL_UNITS} units</span>
+          <span className="font-mono text-xs text-muted-foreground">{totalUnits} units</span>
         </div>
         <div className="relative">
           <SearchIcon className="pointer-events-none absolute top-[11px] left-[11px] size-[15px] text-faint" />
@@ -67,6 +55,7 @@ export function InventoryColumn({ wide, className }: { wide: boolean; className?
         ) : (
           <>
             <TotalsCard />
+            <NewArrivals />
             <CategoryList wide={wide} />
           </>
         )}
@@ -77,12 +66,12 @@ export function InventoryColumn({ wide, className }: { wide: boolean; className?
   );
 }
 
-const floorCats = (f: FloorId) => [...new Set(skusOnFloor(f).map((s) => s.category.name))].join(", ");
-const floorUnits = (f: FloorId) => skusOnFloor(f).reduce((a, s) => a + s.onHand, 0);
-
 function TotalsCard() {
   const floor = useWare((s) => s.floor);
-  const all = useMemo(() => totals(SKUS), []);
+  const inv = useInventory();
+  const all = useMemo(() => totals(inv.skus), [inv]);
+  const floorCats = (f: 1 | 2) => [...new Set(inv.skusOnFloor(f).map((s) => s.category.name))].join(", ");
+  const floorUnits = (f: 1 | 2) => inv.skusOnFloor(f).reduce((a, s) => a + s.onHand, 0);
   return (
     <section className="flex flex-none flex-col gap-3 rounded-xl border border-border bg-card p-3.5">
       <div className="flex items-center justify-between">
@@ -112,9 +101,10 @@ function TotalsCard() {
 }
 
 function CategoryList({ wide }: { wide: boolean }) {
+  const { categories } = useInventory();
   return (
     <section className="flex-none overflow-hidden rounded-xl border border-border bg-card">
-      {CATEGORIES.map((c, i) => (
+      {categories.map((c, i) => (
         <CategoryRow key={c.id} category={c} first={i === 0} wide={wide} />
       ))}
     </section>
@@ -123,7 +113,7 @@ function CategoryList({ wide }: { wide: boolean }) {
 
 function CategoryRow({ category: c, first, wide }: { category: Category; first: boolean; wide: boolean }) {
   const open = useWare((s) => s.openCat === c.id);
-  const active = useWare((s) => !!s.zone && zoneCategory(s.floor, s.zone) === c);
+  const active = useWare((s) => !!s.zone && deriveInventory(s.skus).zoneCategory(s.floor, s.zone)?.id === c.id);
   const threshold = useWare((s) => s.settings.lowStockThreshold);
   const t = totals(c.skus);
   const lowN = c.skus.filter((s) => isLow(s, threshold)).length;
@@ -196,7 +186,7 @@ function CategoryRow({ category: c, first, wide }: { category: Category; first: 
 }
 
 function Results({ q }: { q: string }) {
-  const results = SKUS.filter((s) => matchesQuery(s, q));
+  const results = useInventory().skus.filter((s) => matchesQuery(s, q));
   return (
     <section className="flex-none overflow-hidden rounded-xl border border-border bg-card">
       <div className="flex items-center justify-between border-b border-border px-3.5 pt-3 pb-2.5">
@@ -216,6 +206,7 @@ function Results({ q }: { q: string }) {
 function SkuRow({ sku: s, title }: { sku: Sku; title: string }) {
   const selected = useWare((st) => st.selected === s.sku);
   const low = useWare((st) => isLow(s, st.settings.lowStockThreshold));
+  const { locationText } = useInventory();
   const ref = useRef<HTMLButtonElement>(null);
 
   // When the selection comes from the map or Jarvis, bring the row into view (inventory panel only, never the page).
@@ -240,13 +231,18 @@ function SkuRow({ sku: s, title }: { sku: Sku; title: string }) {
         selected && "bg-brand/12 shadow-[inset_2px_0_0_var(--brand)] hover:bg-brand/12",
       )}
     >
-      <Swatch color={s.color} size={28} />
+      <SkuThumb sku={s} size={28} />
       <span className="flex min-w-0 flex-1 flex-col gap-px">
         <span className="flex items-center gap-[7px]">
           <span className="text-[13.5px] font-medium">{title}</span>
           {low && (
             <Badge variant="warn" className="h-[18px] px-[7px] text-[11px]">
               Low
+            </Badge>
+          )}
+          {s.addedAt && (
+            <Badge variant="outline" className="h-[18px] border-brand/40 px-[7px] text-[11px] text-brand-light">
+              New
             </Badge>
           )}
         </span>

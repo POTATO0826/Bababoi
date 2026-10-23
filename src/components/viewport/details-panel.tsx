@@ -1,25 +1,18 @@
-import { ScanLineIcon, XIcon } from "lucide-react";
-import { clearSelection, selectSku } from "@/actions";
+import { MinusIcon, PlusIcon, ScanLineIcon, XIcon } from "lucide-react";
+import { useState } from "react";
+import { clearSelection, recordMovement, selectSku } from "@/actions";
 import { CardHeading, Kicker, StatTiles, Swatch } from "@/components/common";
+import { SkuThumb } from "@/components/sku-thumb";
 import { Button } from "@/components/ui/button";
-import {
-  PENDING_NOTE,
-  SKU_BY_CODE,
-  available,
-  historyFor,
-  isLow,
-  skuTitle,
-  skusOnFloor,
-  totals,
-  type Sku,
-} from "@/data/catalog";
-import { codesFor } from "@/data/layout";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { PENDING_NOTE, available, historyFor, isLow, skuTitle, totals, type Sku } from "@/data/catalog";
 import { cn } from "@/lib/utils";
-import { setWare, useWare } from "@/store";
+import { setWare, useInventory, useWare } from "@/store";
 
 /** Details popup inside the viewport: floor summary, or the selected model. */
 export function DetailsPanel({ veryTight }: { veryTight: boolean }) {
-  const selected = useWare((s) => (s.selected ? SKU_BY_CODE.get(s.selected) : undefined));
+  const code = useWare((s) => s.selected);
+  const selected = useInventory().byCode.get(code ?? "");
   return (
     <div
       onPointerDown={(e) => e.stopPropagation()}
@@ -55,10 +48,11 @@ function PanelShell({ title, aside, onClose, children }: { title: string; aside?
 function FloorSummary() {
   const floor = useWare((s) => s.floor);
   const threshold = useWare((s) => s.settings.lowStockThreshold);
-  const list = skusOnFloor(floor);
+  const inv = useInventory();
+  const list = inv.skusOnFloor(floor);
   const t = totals(list);
   const lows = list.filter((s) => isLow(s, threshold));
-  const pending = SKU_BY_CODE.get(PENDING_NOTE.sku)!;
+  const pending = inv.byCode.get(PENDING_NOTE.sku);
 
   return (
     <PanelShell
@@ -91,7 +85,7 @@ function FloorSummary() {
       <div className="mt-4">
         <Kicker className="mb-2 block">Awaiting verification</Kicker>
         <button
-          onClick={() => selectSku(pending)}
+          onClick={() => pending && selectSku(pending)}
           className="flex w-full items-center gap-2.5 rounded-md border border-warn/30 bg-warn/6 px-2.5 py-[9px] text-left transition-colors hover:bg-warn/10"
         >
           <ScanLineIcon className="size-4 flex-none text-warn" />
@@ -110,10 +104,11 @@ function FloorSummary() {
 
 function SelectedModel({ sku: s }: { sku: Sku }) {
   const low = useWare((st) => isLow(s, st.settings.lowStockThreshold));
+  const { codesFor } = useInventory();
   return (
     <PanelShell title="Selected model" onClose={clearSelection}>
       <div className="flex items-center gap-2.5">
-        <Swatch color={s.color} size={34} />
+        <SkuThumb sku={s} size={34} />
         <span className="flex min-w-0 flex-col">
           <span className="text-[11px] font-medium text-faint">
             {s.category.name} · {s.model.name}
@@ -142,6 +137,7 @@ function SelectedModel({ sku: s }: { sku: Sku }) {
           ))}
         </div>
       </div>
+      <StockMovement key={s.sku} sku={s} />
       <div className="mt-4">
         <Kicker className="mb-1 block">History</Kicker>
         {historyFor(s).map((h) => (
@@ -158,5 +154,88 @@ function SelectedModel({ sku: s }: { sku: Sku }) {
         View stock movements
       </Button>
     </PanelShell>
+  );
+}
+
+/** Record stock leaving (dispatch) or arriving (receive). A person confirms; reaching 0 removes the model. */
+function StockMovement({ sku: s }: { sku: Sku }) {
+  const [type, setType] = useState<"dispatch" | "receive">("dispatch");
+  const [qty, setQty] = useState(1);
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const max = type === "dispatch" ? s.onHand : 99;
+  const n = Math.min(Math.max(1, qty), Math.max(1, max));
+  const emptiesStock = type === "dispatch" && n >= s.onHand;
+
+  const confirm = () => {
+    const res = recordMovement(s.sku, type, n);
+    if (res.ok) {
+      setConfirming(false);
+      setQty(1);
+      setError(null);
+    } else setError(res.error);
+  };
+
+  return (
+    <div className="mt-4">
+      <div className="mb-2 flex items-center justify-between">
+        <Kicker>Record movement</Kicker>
+        <ToggleGroup
+          type="single"
+          value={type}
+          onValueChange={(v) => {
+            if (!v) return;
+            setType(v as "dispatch" | "receive");
+            setConfirming(false);
+            setError(null);
+          }}
+          spacing={0.5}
+          className="rounded-[7px] border border-border bg-inset p-[3px]"
+          aria-label="Movement type"
+        >
+          <ToggleGroupItem value="dispatch" variant="segment" size="segment">
+            Dispatch
+          </ToggleGroupItem>
+          <ToggleGroupItem value="receive" variant="segment" size="segment">
+            Receive
+          </ToggleGroupItem>
+        </ToggleGroup>
+      </div>
+      <div className="flex items-center gap-2">
+        <div className="flex h-8 items-center rounded-md border border-border bg-inset-2">
+          <Button variant="quiet" size="icon-sm" className="size-8" aria-label="Fewer" onClick={() => setQty(Math.max(1, n - 1))} disabled={n <= 1}>
+            <MinusIcon />
+          </Button>
+          <span className="w-8 text-center font-mono text-[13px] tabular-nums" aria-live="polite">
+            {n}
+          </span>
+          <Button variant="quiet" size="icon-sm" className="size-8" aria-label="More" onClick={() => setQty(Math.min(max, n + 1))} disabled={n >= max}>
+            <PlusIcon />
+          </Button>
+        </div>
+        {confirming ? (
+          <Button
+            onClick={confirm}
+            className={cn("h-8 flex-1 text-[12.5px]", emptiesStock && "bg-warn text-background hover:bg-warn/90")}
+          >
+            Confirm {type === "dispatch" ? `−${n}` : `+${n}`}
+          </Button>
+        ) : (
+          <Button variant="outline" onClick={() => setConfirming(true)} className="h-8 flex-1 bg-transparent text-[12.5px] shadow-none dark:bg-transparent">
+            {type === "dispatch" ? "Dispatch" : "Receive"} {n} {n === 1 ? "unit" : "units"}
+          </Button>
+        )}
+      </div>
+      {confirming && (
+        <p className={cn("mt-1.5 text-[11.5px]", emptiesStock ? "text-warn" : "text-faint")}>
+          {emptiesStock
+            ? "This empties the stock: the model and its icon are removed from the list and the map."
+            : type === "dispatch"
+              ? `${s.onHand - n} will remain on hand.`
+              : `${s.onHand + n} on hand after receiving. Extra bays are taken from free space if needed.`}
+        </p>
+      )}
+      {error && <p className="mt-1.5 text-[11.5px] text-destructive">{error}</p>}
+    </div>
   );
 }

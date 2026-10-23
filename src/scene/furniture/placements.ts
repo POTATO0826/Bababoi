@@ -1,6 +1,7 @@
 // Packs each bay's units into the bay rect. Every placement is one instance of a template.
 import { PENDING_NOTE, type FloorId, type FurnitureKind } from "@/data/catalog";
-import { AREAS, BAYS, type Bay } from "@/data/layout";
+import type { Bay } from "@/data/inventory";
+import { AREAS } from "@/data/layout";
 import type { TemplateId } from "./templates";
 
 export interface Placement {
@@ -159,8 +160,8 @@ export const PENDING_RECT = (() => {
   return [Math.min(...xs) - 1.6, 3.3, Math.max(...xs) + 1.6, 5.2] as const;
 })();
 
-export function placementsFor(floor: FloorId): Placement[] {
-  const out = BAYS[floor].filter((b) => b.sku && b.qty > 0).flatMap(placeBay);
+export function placementsFor(floor: FloorId, bays: readonly Bay[]): Placement[] {
+  const out = bays.filter((b) => b.sku && b.qty > 0).flatMap(placeBay);
   if (floor === 1) out.push(...pendingDelivery());
   return out;
 }

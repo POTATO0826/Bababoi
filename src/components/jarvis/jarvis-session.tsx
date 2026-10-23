@@ -1,14 +1,14 @@
 import { MicIcon, MicOffIcon, XIcon } from "lucide-react";
 import { closeAgent, runCommand, toggleMute, voiceInputSupported } from "@/actions";
-import { Kicker, Swatch, TotalsStrip, WarehouseIcon } from "@/components/common";
+import { Kicker, TotalsStrip, WarehouseIcon } from "@/components/common";
 import { JarvisOrb, OrbStatus } from "@/components/jarvis/orb";
+import { SkuThumb } from "@/components/sku-thumb";
 import { Button } from "@/components/ui/button";
-import { SKU_BY_CODE, available, skuTitle, zoneCategory } from "@/data/catalog";
-import { codesFor } from "@/data/layout";
+import { available, skuTitle } from "@/data/catalog";
 import { cn } from "@/lib/utils";
-import { useWare } from "@/store";
+import { useInventory, useWare } from "@/store";
 
-const SUGGESTIONS = ["Take me to the grey L-shaped sofa", "Show low-stock items", "Analyze today’s changes"];
+const SUGGESTIONS = ["Take me to the grey L-shaped sofa", "Show low-stock items", "What are the new arrivals?"];
 
 /** Listening session — not a chatbot: no text input, no chat log. */
 export function JarvisSession({ drawer, className }: { drawer: boolean; className?: string }) {
@@ -98,8 +98,10 @@ function OnTheMap() {
   const floor = useWare((s) => s.floor);
   const zone = useWare((s) => s.zone);
   const view = useWare((s) => s.view);
-  const selected = useWare((s) => (s.selected ? SKU_BY_CODE.get(s.selected) : undefined));
-  const zc = zone ? zoneCategory(floor, zone) : null;
+  const code = useWare((s) => s.selected);
+  const inv = useInventory();
+  const selected = inv.byCode.get(code ?? "");
+  const zc = zone ? inv.zoneCategory(floor, zone) : null;
   const line = `Floor ${floor}${zone ? ` · ${zc?.name ?? "Zone"} · Zone ${zone}` : " · Overview"}${view === "top" ? " · Top-down" : ""}`;
 
   return (
@@ -112,7 +114,7 @@ function OnTheMap() {
       {selected && (
         <div className="flex animate-fade-up flex-col gap-2 rounded-lg border border-brand/35 bg-brand/8 p-2.5">
           <div className="flex items-center gap-2">
-            <Swatch color={selected.color} size={22} />
+            <SkuThumb sku={selected} size={22} />
             <span className="flex min-w-0 flex-col">
               <span className="truncate text-[13px] font-semibold">{skuTitle(selected)}</span>
               <span className="font-mono text-[11px] text-muted-foreground">
@@ -122,7 +124,7 @@ function OnTheMap() {
           </div>
           <TotalsStrip totals={{ ...selected, available: available(selected) }} short className="border-border bg-border" />
           <div className="flex flex-wrap gap-1">
-            {codesFor(selected).map((c) => (
+            {inv.codesFor(selected).map((c) => (
               <span key={c.code} className="inline-flex h-5 items-center rounded-sm border border-brand/35 px-[7px] font-mono text-[10.5px]">
                 {c.code}
                 <span className="ml-[5px] text-faint">×{c.qty}</span>

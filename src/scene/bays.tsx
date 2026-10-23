@@ -5,9 +5,10 @@ import { selectSku, zoomZone } from "@/actions";
 import { Swatch } from "@/components/common";
 import { dragState, setPointing } from "@/interaction";
 import { PENDING_NOTE, available, isLow, skuTitle, type FloorId, type ZoneId } from "@/data/catalog";
-import { BAYS, ZONE_IDS, ZONES, type Bay } from "@/data/layout";
+import type { Bay } from "@/data/inventory";
+import { ZONE_IDS, ZONES } from "@/data/layout";
 import { cn } from "@/lib/utils";
-import { getWare, setWare, useWare } from "@/store";
+import { getWare, setWare, useInventory, useWare } from "@/store";
 import { PENDING_RECT } from "./furniture/placements";
 import { rectLoop } from "./structure";
 
@@ -181,7 +182,7 @@ function bayHeight(bay: Bay) {
 function HoverTip({ floor }: { floor: FloorId }) {
   const hoverId = useWare((s) => s.hoverBay);
   const threshold = useWare((s) => s.settings.lowStockThreshold);
-  const bay = hoverId ? BAYS[floor].find((b) => b.id === hoverId) : undefined;
+  const bay = useInventory().bays[floor].find((b) => b.id === hoverId);
   const pending = hoverId === "pending";
   if (!bay?.sku && !pending) return null;
 
@@ -245,7 +246,8 @@ function PendingHit() {
 
 export function BaysLayer({ floor }: { floor: FloorId }) {
   const showEmpty = useWare((s) => s.settings.showEmptyBays);
-  const bays = BAYS[floor].filter((b) => showEmpty || b.sku);
+  const all = useInventory().bays[floor];
+  const bays = all.filter((b) => showEmpty || b.sku);
   return (
     <group>
       {ZONE_IDS.map((z) => (
@@ -254,7 +256,7 @@ export function BaysLayer({ floor }: { floor: FloorId }) {
       {bays.map((b) => (
         <BayPad key={b.id} bay={b} />
       ))}
-      {BAYS[floor].map((b) => (
+      {all.map((b) => (
         <BayHit key={b.id} bay={b} height={bayHeight(b)} />
       ))}
       {floor === 1 && <PendingHit />}

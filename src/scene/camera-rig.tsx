@@ -1,7 +1,7 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useRef } from "react";
 import * as THREE from "three";
-import { FLOOR_D, FLOOR_W, ZONES, type Rect } from "@/data/layout";
+import { ZONES, type Rect } from "@/data/layout";
 import { getWare, setWare } from "@/store";
 
 // True isometric: camera along (1,1,1) — azimuth 45°, elevation asin(1/√3) ≈ 35.26°.
@@ -12,6 +12,8 @@ const DIST = 300;
 const PANEL_W = 344;
 /** Jarvis drawer (fixed, under 980px wide) overlapping the viewport. */
 const DRAWER_W = 352;
+/** The racked area (zones A–D). The overview frames this rather than the bare slab, so the empty corners crop off. */
+const RACKS: Rect = [ZONES.A[0], ZONES.A[1], ZONES.D[2], ZONES.D[3]];
 
 /** Current (eased) camera angles, read by the walls for the cutaway. */
 export const rig = { az: Math.PI / 4, el: ISO_EL };
@@ -79,7 +81,7 @@ export function CameraRig() {
     const availH = Math.max(120, size.height - 104);
     const f = s.zone
       ? frame(ZONES[s.zone], 0, 3, goalAz, goalEl, availW, availH, 0.9)
-      : frame([0, 0, FLOOR_W, FLOOR_D], -1.6, 2.4, goalAz, goalEl, availW, availH, 1.0);
+      : frame(RACKS, -1.6, 2.4, goalAz, goalEl, availW, availH, 1.0);
     const goalZoom = f.zoom * s.zoomMul;
     // Centre the framed area in the space that's left.
     const goalTarget = f.target.addScaledVector(f.right, reserve / 2 / goalZoom);

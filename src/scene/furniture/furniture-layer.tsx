@@ -2,8 +2,8 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import type { FloorId } from "@/data/catalog";
-import { BAYS } from "@/data/layout";
-import { useWare } from "@/store";
+import type { Bay } from "@/data/inventory";
+import { useInventory, useWare } from "@/store";
 import { placementsFor, type Placement } from "./placements";
 import { getTemplate, type TemplateId } from "./templates";
 
@@ -95,15 +95,16 @@ const HOVER_LINE = new THREE.Color("#fafafa");
 // ── Layer ─────────────────────────────────────────────────────────────────
 
 export function FurnitureLayer({ floor }: { floor: FloorId }) {
+  const bays = useInventory().bays[floor];
   const groups = useMemo(() => {
     const by = new Map<TemplateId, Placement[]>();
-    for (const p of placementsFor(floor)) {
+    for (const p of placementsFor(floor, bays)) {
       const list = by.get(p.tpl) ?? [];
       list.push(p);
       by.set(p.tpl, list);
     }
     return [...by.entries()];
-  }, [floor]);
+  }, [floor, bays]);
 
   useFrame(({ camera }) => {
     // Keep the outline about 2px wide whatever the zoom.
@@ -113,7 +114,7 @@ export function FurnitureLayer({ floor }: { floor: FloorId }) {
   return (
     <group>
       {groups.map(([tpl, items]) => (
-        <TemplateInstances key={`${floor}-${tpl}`} floor={floor} tpl={tpl} items={items} />
+        <TemplateInstances key={`${floor}-${tpl}`} bays={bays} tpl={tpl} items={items} />
       ))}
     </group>
   );
@@ -142,7 +143,7 @@ function shareGeometry(src: THREE.BufferGeometry, glow?: THREE.InstancedBufferAt
   return g;
 }
 
-function TemplateInstances({ floor, tpl, items }: { floor: FloorId; tpl: TemplateId; items: Placement[] }) {
+function TemplateInstances({ bays, tpl, items }: { bays: readonly Bay[]; tpl: TemplateId; items: Placement[] }) {
   const selected = useWare((s) => s.selected);
   const hoverBay = useWare((s) => s.hoverBay);
 
@@ -190,9 +191,7 @@ function TemplateInstances({ floor, tpl, items }: { floor: FloorId; tpl: Templat
 
   // Highlight: glow + outline on every unit of the selected SKU, and on the hovered bay.
   useEffect(() => {
-    const selectedBays = new Set(
-      selected ? BAYS[floor].filter((b) => b.sku?.sku === selected).map((b) => b.id) : [],
-    );
+    const selectedBays = new Set(selected ? bays.filter((b) => b.sku?.sku === selected).map((b) => b.id) : []);
     const { glow, outline } = meshes;
     let n = 0;
     items.forEach((p, i) => {
@@ -210,7 +209,7 @@ function TemplateInstances({ floor, tpl, items }: { floor: FloorId; tpl: Templat
     outline.count = n;
     outline.instanceMatrix.needsUpdate = true;
     if (outline.instanceColor) outline.instanceColor.needsUpdate = true;
-  }, [meshes, items, selected, hoverBay, floor]);
+  }, [meshes, items, selected, hoverBay, bays]);
 
   return (
     <>
