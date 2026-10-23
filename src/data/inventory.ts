@@ -15,6 +15,8 @@ import { FLOOR_IDS, SLOT_BY_ID, SLOTS, ZONE_IDS, type Slot } from "./layout";
 export interface Bay extends Slot {
   sku: Sku | null;
   qty: number;
+  /** Batch occupying the bay, when the ledger tracks batches. */
+  batchId?: string;
 }
 
 export interface Inventory {
@@ -87,7 +89,8 @@ export function deriveInventory(records: readonly SkuRecord[]): Inventory {
       const b = bayById.get(id);
       if (!b || remaining <= 0) break;
       b.sku = s;
-      b.qty = Math.min(s.cap, remaining);
+      b.qty = Math.min(s.slotQty?.[id] ?? s.cap, remaining);
+      b.batchId = s.slotBatch?.[id];
       remaining -= b.qty;
     }
   }
@@ -142,14 +145,18 @@ export function planBays(
   count: number,
   prefer?: { floor: FloorId; zone: ZoneId },
 ): string[] {
+  const zones = records.filter((r) => r.category === category && r.onHand > 0).map((r) => ({ floor: r.floor, zone: r.zone }));
+  return planSlots(freeSlotIds(records), count, prefer ? [prefer, ...zones] : zones);
+}
+
+/** Pick `count` bays from `free`, trying the preferred zones first and one zone for the whole delivery. */
+export function planSlots(free: ReadonlySet<string>, count: number, prefer: readonly { floor: FloorId; zone: ZoneId }[] = []): string[] {
   if (count <= 0) return [];
-  const free = freeSlotIds(records);
   const order: { floor: FloorId; zone: ZoneId }[] = [];
   const push = (floor: FloorId, zone: ZoneId) => {
     if (!order.some((o) => o.floor === floor && o.zone === zone)) order.push({ floor, zone });
   };
-  if (prefer) push(prefer.floor, prefer.zone);
-  for (const r of records) if (r.category === category && r.onHand > 0) push(r.floor, r.zone);
+  for (const o of prefer) push(o.floor, o.zone);
   for (const f of FLOOR_IDS) for (const z of ZONE_IDS) push(f, z);
 
   const freeIn = (o: { floor: FloorId; zone: ZoneId }) => SLOTS[o.floor][o.zone].filter((s) => free.has(s.id)).map((s) => s.id);

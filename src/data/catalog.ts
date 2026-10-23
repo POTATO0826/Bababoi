@@ -177,6 +177,10 @@ export interface SkuRecord {
   doors: number;
   /** Bay ids allocated to this SKU, in fill order. */
   bays: string[];
+  /** Units per bay when known (from the batch ledger); otherwise bays fill `cap` units in order. */
+  slotQty?: Record<string, number>;
+  /** Batch id per bay (from the batch ledger). */
+  slotBatch?: Record<string, string>;
   /** Set on models received through the "New arrivals" flow. */
   addedAt?: number;
   /** AI-generated SVG icon markup. */
