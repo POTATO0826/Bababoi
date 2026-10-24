@@ -1,9 +1,10 @@
-// Browser test harness (not shipped): the real Jarvis chat and receipt measurement components, served by
+// Browser test harness (not shipped): the real Jarvis chat, receipt measurement and Lalamove connection components, served by
 // tests/browser/run.ts next to the real local demo routes. The full app needs the local Convex sync backend.
 import "../../src/index.css";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Doc } from "@convex/_generated/dataModel";
+import { LalamoveCard, LalamoveConnectDialog } from "@/components/delivery/lalamove-connection";
 import { applyMeasure, MeasureEditor, ReceiptTotalsView, type RawMeasures } from "@/components/detail/measures";
 import { JarvisChat } from "@/components/jarvis/jarvis-chat";
 import { setIdentity, setWare } from "@/store";
@@ -32,6 +33,10 @@ setWare({ agentOpen: true });
 createRoot(document.getElementById("root")!).render(
   <main className="flex min-h-screen gap-4 bg-background p-4 text-foreground">
     <div className="flex h-[640px] w-[380px]"><JarvisChat drawer={false} className="flex-1" /></div>
-    <Measures />
+    <div className="flex w-[360px] flex-col gap-4">
+      <Measures />
+      <section aria-label="Lalamove harness"><LalamoveCard /></section>
+    </div>
+    <LalamoveConnectDialog />
   </main>,
 );

@@ -124,6 +124,9 @@ export interface WareState {
   localAgent: LocalAgentState | null;
   /** The masked Claude API key form is open (the key itself is never stored here). */
   agentLoginOpen: boolean;
+  /** Local demo: Lalamove sandbox connection state (no credentials), null until checked. */
+  lalamove: (import("./local/lalamove-client").LalamoveStatus & { checkedAt: number }) | null;
+  lalamoveConnectOpen: boolean;
 
   settings: Settings;
 }
@@ -185,6 +188,8 @@ export const useWare = create<WareState>()(() => ({
   micError: null,
   localAgent: null,
   agentLoginOpen: false,
+  lalamove: null,
+  lalamoveConnectOpen: false,
 
   settings: readSettings(),
 }));

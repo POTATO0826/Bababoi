@@ -19,7 +19,7 @@ is `.convex/demo-backend.log`.
 | Part | Where | Notes |
 | --- | --- | --- |
 | Local Convex backend (accountless) | `http://127.0.0.1:3210` (+ HTTP actions on `:3211`) | Created by the Convex CLI with `CONVEX_AGENT_MODE=anonymous`; never a cloud deployment |
-| WareOrb web server + local agent service | `http://127.0.0.1:3000` | Mints the presenter's token, serves `/api/agent/*`, and the photo-reading bridge |
+| WareOrb web server + local agent service | `http://127.0.0.1:3000` | Mints the presenter's token, serves `/api/agent/*`, `/api/lalamove/*`, and the photo-reading and quote bridges |
 | Pi warehouse analyst | inside the web server | Uses the operator's Pi login; only four read-only warehouse tools |
 
 ## Requirements
@@ -70,6 +70,72 @@ order is `openai-codex/gpt-6.1-sol`, then `anthropic/claude-sonnet-5-5`; overrid
 fallback until the next web login. Logging out in the app never changes Pi's shared credentials.
 Without any connection, manual warehouse work still works, and Jarvis shows **Jarvis not connected**
 with a Log in button, never a scripted answer.
+
+## Lalamove sandbox quotes (Delivery)
+
+Delivery prices come from the **Lalamove sandbox for Malaysia**. This milestone is **quotes only**:
+WareOrb never calls `/v3/orders`, never books a driver and never charges money. The only Lalamove
+calls are `GET /v3/cities` and `POST /v3/quotations` on `https://rest.sandbox.lalamove.com`, signed
+with your key (HMAC-SHA256) and sent with `Market: MY`. There is no production switch and no
+arbitrary-URL proxy.
+
+Connect (no terminal, no dashboard):
+
+1. Open **Delivery** (`/delivery` + Enter, or the Delivery panel). The **Lalamove** card shows
+   **Lalamove not connected** with **Connect**.
+2. Enter your sandbox **API key** (`pk_test_…`) and **API secret** (`sk_test_…`) in the masked fields
+   and press **Connect**. The server checks them with a signed `GET /v3/cities`
+   ("Checking with Lalamove…", 10-second limit). Cancel stops the check.
+3. The card shows **Connected · Lalamove sandbox**, `MY · <n> vehicle types · checked <time>`, and
+   **Test connection**, **Replace keys** and **Disconnect**.
+
+Credential lifetime and handling (same rules as the Claude key):
+
+- Kept **only in the WareOrb server's memory** for this run. A page refresh keeps the connection;
+  stopping or restarting `bun run demo` forgets it. Never written to disk, `.env.local`, Convex records
+  or Convex environment variables, the browser (no storage, URL or bundle), the chat, tool arguments
+  or results, logs or API responses. Provider errors are redacted.
+- Both fields are uncontrolled password inputs, cleared on success, cancel and close. A Lalamove
+  `pk_test_…`/`sk_test_…` value pasted into Jarvis's chat is refused and never sent to the model.
+- A wrong key or secret, a timeout or a network failure shows a clear error. **Replacing** keys that
+  fail keeps the working connection. **Test connection** refreshes the vehicle list; a revoked key
+  disconnects, a network blip is shown as "Last check failed". **Disconnect** stops all further
+  requests with the old keys (a quote still in flight is discarded).
+- The Claude (Jarvis) connection and the Lalamove connection are independent: logging out of one
+  never changes the other.
+- The `/api/lalamove/*` routes accept only a same-origin JSON POST from this exact page (as for
+  `/login`), are size-limited and `no-store`, and do not exist outside local demo mode. Convex's quote
+  action reaches the in-memory connection through `/internal/lalamove/quote` on this computer, with the
+  generated bridge secret (the same loopback pattern as photo reading). The secret never reaches Convex.
+
+What a quote needs (Delivery explains this when nothing is ready yet, with **Start sale from stock**):
+
+- A deal with stock, quantity, buyer, a confirmed destination (address + coordinates) and a
+  collection time. Pickup is the warehouse (coordinates shown with map links).
+- **Confirmed shipment measurements**: package count, L×W×H (cm) and weight (kg) per package, with
+  their source shown — **Measured at receiving** (from the batch's receipt line), **Catalogue (not
+  measured)** or **Entered by staff**. Staff confirm or correct them on the deal. Unknown values stay
+  unknown and block quotes; they never become zero or "Fits". When the receipt has several lines for the
+  same SKU, WareOrb lists them and asks which one applies instead of guessing.
+- Vehicles come from Lalamove's live city list (or its cached copy, labelled). Each vehicle shows
+  whether the confirmed cargo fits its published size and load; only fitting vehicles can be quoted.
+  Vehicles without published capacity are "unknown" and cannot be quoted. The fit check is a
+  bounding-box estimate: loading and stacking still need a person's confirmation.
+
+Quotes show the returned total and currency, the price breakdown, "Lalamove sandbox" as the source,
+the request time and the **returned** expiry (a quote without one is treated as expired; none is
+invented). Changing the cargo, route, quantity, schedule or services makes earlier quotes stale.
+Repeated clicks reuse a pending or current quote, and requests are rate-limited. A Lalamove failure
+(unsupported route or vehicle, rejected key, rate limit, timeout) is shown as a failed quote, never
+replaced by a sample price. Sample vehicle sizes are only used when you deliberately pick them, and are
+labelled "(sample size)".
+
+Jarvis has four narrow delivery tools: `list_delivery_deals`, `get_delivery` (missing inputs, route,
+cargo and its source, vehicle fit), `get_delivery_quotes` and `request_delivery_quotes`. They use the
+same authorised Convex functions and validation as the Delivery screen and return the same stored
+quote records. Jarvis refuses to request quotes for an incomplete shipment, unconfirmed cargo, a
+non-fitting vehicle or a disconnected Lalamove, asks for missing details, and never invents
+addresses, coordinates, measurements, prices or bookings.
 
 ## Optional settings (shell environment)
 
@@ -138,13 +204,18 @@ If a check fails, move the offending `.env*` file aside or use a separate checko
 | Login: "Checking the key timed out" / "Could not reach api.anthropic.com" | Check the internet connection, then try again |
 | Jarvis: "The provider rejected the credentials" | The key was revoked meanwhile: **Log out**, then **Log in** with a valid key |
 | Connected before, disconnected after restarting the demo | Expected: web-entered keys live only in server memory; log in again |
+| Delivery: "Lalamove not connected" | Click **Connect** and enter your sandbox API key and secret (Malaysia) |
+| Lalamove: "rejected the API key or secret" | Check both values are the **sandbox** pair for Malaysia; create a new pair in the Lalamove partner portal if needed |
+| Lalamove: "Could not reach Lalamove" / timed out | Check the internet connection, then **Test connection** |
+| Quote failed: "does not serve this route" | The sandbox has no service for those coordinates or that vehicle; check the destination |
+| "Confirm the shipment measurements" | Open the deal → Shipment, confirm or enter package sizes and weights |
 | Voice note says "No transcript" | Use Chrome, allow the microphone, check the internet; the recording is kept anyway |
 
 ## Tests
 
 ```sh
 bun run check            # unit + Convex tests, both typechecks, production build
-bun run test:browser     # Chromium harness: Jarvis streaming + measurements (needs Playwright)
+bun run test:browser     # Chromium harness: Jarvis, measurements, Lalamove card (needs Playwright)
 ```
 
 Agent tests use Pi's scripted **faux provider** and say so ("mocked provider"). They prove the
@@ -155,6 +226,14 @@ reconnect, refresh, and the complete app bundle booting in demo mode. It uses a 
 the mocked provider. `WAREORB_E2E_LIVE=1 WAREORB_E2E_CLAUDE_KEY=… bun run test:browser` repeats it with
 a real key typed into the form and checked by Anthropic (synthetic data only; the key stays in that
 shell's environment).
+
+Lalamove tests use a **mocked Lalamove sandbox** (`src/local/lalamove-mock.ts`) that verifies each
+request's HMAC signature and records every URL. They cover connect/test/replace/disconnect, leakage,
+origins and the quote bridge, city parsing and unit conversion, missing capacities, signed quotes,
+returned price/expiry, 401/403/422/429, timeouts, cargo provenance and fit, and Jarvis's delivery
+tools. Each asserts that no `/v3/orders` call is made. They are **not** live Lalamove evidence. The
+browser test also connects the real Lalamove card against that mock (wrong secret, connect, test,
+disconnect) and checks `/delivery` + Enter.
 
 ## Presentation-Mac smoke test (live checks)
 

@@ -8,6 +8,7 @@ import { Header } from "@/components/header";
 import { LedgerSync } from "@/components/ledger-sync";
 import { StageColumn } from "@/components/stages/stage-column";
 import { ReceiveDialog } from "@/components/inventory/receive-dialog";
+import { LalamoveConnectDialog } from "@/components/delivery/lalamove-connection";
 import { JarvisChat } from "@/components/jarvis/jarvis-chat";
 import { Viewport } from "@/components/viewport/viewport";
 import { Toaster } from "@/components/ui/sonner";
@@ -19,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { WarehouseIcon } from "@/components/common";
 import { errorText, interimIdentity } from "@/convex";
 import { setAuthTokenProvider } from "@/auth-token";
-import { useIdentity } from "@/identity";
+import { localDemo, useIdentity } from "@/identity";
 
 // Body grid per docs/design-handoff.md → Layout. `stacked` (<720px) is an addition for phones.
 const COLUMNS = {
@@ -152,6 +153,7 @@ function Workspace({ profile }: { profile: StaffProfile }) {
         </div>
       </div>
       <ReceiveDialog />
+      {localDemo && <LalamoveConnectDialog />}
       <Toaster position="bottom-right" theme="dark" />
     </TooltipProvider>
   );

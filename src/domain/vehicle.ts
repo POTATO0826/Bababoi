@@ -1,4 +1,5 @@
 // Does the consignment fit a vehicle? Weight + per-piece box check + a loose volume check.
+// An estimate only: it does not prove that furniture loads through the door or stacks safely.
 import type { Package } from "./types";
 
 export interface VehicleSpec {
@@ -13,9 +14,14 @@ export interface VehicleSpec {
 
 export type FitStatus = "fits" | "check" | "no" | "unknown";
 
+const positive = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n > 0;
+export const validPiece = (p: Package) => positive(p.lCm) && positive(p.wCm) && positive(p.hCm) && positive(p.kg);
+
 export function fit(pieces: readonly Package[], v: VehicleSpec): { status: FitStatus; reasons: string[] } {
-  if (!pieces.length || !v.loadKg || !v.lengthCm) return { status: "unknown", reasons: ["Missing size or weight"] };
-  const kg = pieces.reduce((a, p) => a + p.kg, 0);
+  if (!pieces.length) return { status: "unknown", reasons: ["Missing size or weight"] };
+  if (!pieces.every(validPiece)) return { status: "unknown", reasons: ["Some package sizes or weights are unknown"] };
+  if (!positive(v.loadKg) || !positive(v.lengthCm) || !positive(v.widthCm) || !positive(v.heightCm)) return { status: "unknown", reasons: ["Vehicle capacity not provided"] };
+  const kg = Math.round(pieces.reduce((a, p) => a + p.kg, 0) * 100) / 100;
   if (kg > v.loadKg) return { status: "no", reasons: [`${kg} kg > ${v.loadKg} kg`] };
   const space = [v.lengthCm, v.widthCm, v.heightCm].sort((a, b) => b - a);
   const tooBig = pieces.find((p) => {

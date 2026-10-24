@@ -1,4 +1,4 @@
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { CheckIcon, ExternalLinkIcon, MapPinIcon, SendIcon, TruckIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ConvexError } from "convex/values";
@@ -20,15 +20,18 @@ import { missingFields } from "@/domain/deal";
 import { fmtRM, sen } from "@/domain/money";
 import { BUYER_PLACES, mapsLink, WAREHOUSE } from "@/domain/places";
 import { planPick, slotCode } from "@/domain/stock";
-import { fit, piecesFor, type VehicleSpec } from "@/domain/vehicle";
 import { cn } from "@/lib/utils";
 import { actorNow, useWare } from "@/store";
 import { DEAL_STATUS, useNow } from "@/workflow";
 import { DetailShell, Section } from "./detail-shell";
+import { LalamoveCard } from "@/components/delivery/lalamove-connection";
+import { ShipmentSection, useCargoPlan, useDeliveryServices } from "@/components/delivery/shipment";
+import { serviceFits, type CargoPlan } from "@/domain/shipment";
+import { breakdownLines } from "@/domain/lalamove";
+import { localDemo } from "@/identity";
 
 type DealDoc = Doc<"deals">;
 type QuoteDoc = Doc<"quotes">;
-type Service = VehicleSpec & { specialRequests: string[] };
 type DealIntent = { version: number; stateVersion: number };
 const captureIntent = (deal: DealDoc): DealIntent => ({ version: deal.version, stateVersion: deal.stateVersion ?? 0 });
 const intentChanged = (intent: DealIntent, deal: DealDoc) => intent.version !== deal.version || intent.stateVersion !== (deal.stateVersion ?? 0);
@@ -62,7 +65,7 @@ export function DealDetail({ id }: { id: string }) {
       }
     >
       <BuyerSection key={deal._id} deal={deal} />
-      {deal.buyer && <QuotesSection deal={deal} quotes={quotes} packages={sku?.packages ?? []} />}
+      <DeliverySections deal={deal} quotes={quotes} />
       {(deal.status === "pending_approval" || deal.decision) && <DecisionSection deal={deal} quotes={quotes} />}
       {(deal.status === "approved" || deal.status === "collected") && <CollectSection key={deal._id} deal={deal} />}
       <History entity={`deal:${deal._id}`} />
@@ -319,40 +322,40 @@ const toLocalInput = (t: number) => {
 
 // ── Quotes ───────────────────────────────────────────────────────────────
 
-function useServices() {
-  const load = useAction(api.lalamove.services);
-  const [state, setState] = useState<{ source: "live" | "fixture"; services: Service[] } | null>(null);
-  useEffect(() => {
-    let alive = true;
-    load({})
-      .then((r) => alive && setState(r))
-      .catch(() => alive && setState({ source: "fixture", services: [] }));
-    return () => {
-      alive = false;
-    };
-  }, [load]);
-  return state;
+function DeliverySections({ deal, quotes }: { deal: DealDoc; quotes: QuoteDoc[] }) {
+  const plan = useCargoPlan(deal);
+  return <>
+    <ShipmentSection deal={deal} plan={plan} />
+    {deal.buyer && <QuotesSection deal={deal} quotes={quotes} plan={plan} />}
+  </>;
 }
 
-function QuotesSection({ deal, quotes, packages }: { deal: DealDoc; quotes: QuoteDoc[]; packages: Doc<"skus">["packages"] }) {
+const SERVICES_LABEL = { lalamove: "From Lalamove", cache: "Lalamove (cached)", live: "Lalamove MY", fixture: "Sizes: sample", sample: "Sample sizes (no quotes)", none: "No vehicle list" } as const;
+
+function QuotesSection({ deal, quotes, plan }: { deal: DealDoc; quotes: QuoteDoc[]; plan: CargoPlan | null }) {
   const role = useWare((s) => s.role);
   const now = useNow(1000);
-  const services = useServices();
+  const [services, reloadServices] = useDeliveryServices();
   const request = useMutation(api.quotes.request);
   const demo = useMutation(api.quotes.addDemoReplies);
   const submit = useMutation(api.deals.submit);
   const confirmFit = useMutation(api.deals.confirmFit);
   const demoMode = useWare((s) => s.ledger?.settings.demoMode);
+  const lalamove = useWare((s) => s.lalamove);
   const [picked, setPicked] = useState<string[]>([]);
   const [chosen, setChosen] = useState<string | null>(null);
   const [manual, setManual] = useState(false);
+  const [requesting, setRequesting] = useState(false);
   const missing = missingFields(deal);
   const canQuote = (role === "sales" || role === "owner") && missing.length === 0 && ["offer_ready", "pending_approval", "rejected"].includes(deal.status);
   const canSubmit = (role === "sales" || role === "owner") && ["offer_ready", "rejected"].includes(deal.status);
   useEffect(() => { setChosen(null); setPicked([]); }, [deal._id, deal.version]);
 
-  const pieces = useMemo(() => piecesFor(packages, deal.qty), [packages, deal.qty]);
-  const vehicles = (services?.services ?? []).map((v) => ({ v, f: fit(pieces, v) }));
+  // Fit uses the shipment's confirmed (or suggested, for preview) packages; unknown cargo is never "Fits".
+  const fits = plan ? serviceFits(plan, services?.services ?? []) : [];
+  const vehicles = fits.map((f) => ({ v: f.service, f: { status: f.status, reasons: [f.reason] }, eligible: f.eligible }));
+  const quotable = services?.source !== "sample" && services?.source !== "fixture" && services?.source !== "none" && (!localDemo || lalamove?.connected === true);
+  const cargoConfirmed = plan?.status === "confirmed";
   const current = quotes.filter((q) => q.dealVersion === deal.version);
   const { ranked, other } = rankQuotes(current, deal, now);
   const best = ranked[0]?.quote._id;
@@ -360,12 +363,18 @@ function QuotesSection({ deal, quotes, packages }: { deal: DealDoc; quotes: Quot
   return (
     <Section
       label="Delivery"
-      aside={services && <Badge variant="tag">{services.source === "live" ? "Lalamove MY" : "Sizes: sample"}</Badge>}
+      aside={services && <Badge variant={services.source === "lalamove" || services.source === "cache" || services.source === "live" ? "tag" : "warn"}>{SERVICES_LABEL[services.source]}</Badge>}
     >
+      {localDemo && canQuote && <LalamoveCard compact />}
       {canQuote && (
         <div className="flex flex-col gap-1.5">
           {!services && <Spinner />}
+          {services?.source === "none" && <span className="text-[12px] text-warn">{services.error}{localDemo && <> <Button size="xs" variant="quiet" onClick={() => reloadServices({ sample: true })}>Preview fit with sample sizes</Button></>}</span>}
+          {services?.source === "sample" && <span className="text-[12px] text-warn">Sample vehicle sizes for a fit preview only. They are not Lalamove data and cannot be quoted.</span>}
+          {services && (services.source === "lalamove" || services.source === "cache") && <span className="font-mono text-[11px] text-faint">Vehicle list {services.source === "cache" ? "cached" : "fetched"} {new Date(services.fetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} <Button size="xs" variant="quiet" onClick={() => reloadServices({ refresh: true })}>Refresh</Button></span>}
+          {!cargoConfirmed && <span className="text-[12px] text-warn">Confirm the shipment measurements above before requesting quotes.</span>}
           {vehicles.map(({ v, f }) => {
+            const eligibleOf = (key: string) => vehicles.some((x) => x.v.key === key && x.eligible);
             const on = picked.includes(v.key);
             return (
               <label
@@ -373,12 +382,12 @@ function QuotesSection({ deal, quotes, packages }: { deal: DealDoc; quotes: Quot
                 className={cn(
                   "flex cursor-pointer items-center gap-2.5 rounded-md border border-border px-2.5 py-2 text-[12.5px]",
                   on && "border-brand/50 bg-brand/8",
-                  f.status === "no" && "cursor-not-allowed opacity-50",
+                  !eligibleOf(v.key) && "cursor-not-allowed opacity-60",
                 )}
               >
                 <Checkbox
                   checked={on}
-                  disabled={f.status === "no" || (!on && picked.length >= 3)}
+                  disabled={!quotable || !eligibleOf(v.key) || (!on && picked.length >= 3)}
                   onCheckedChange={(c) => setPicked((p) => (c ? [...p, v.key] : p.filter((x) => x !== v.key)))}
                 />
                 <span className="flex min-w-0 flex-1 flex-col">
@@ -386,7 +395,7 @@ function QuotesSection({ deal, quotes, packages }: { deal: DealDoc; quotes: Quot
                   <span className="truncate font-mono text-[10.5px] text-faint">{f.reasons[0]}</span>
                 </span>
                 <Badge variant={f.status === "fits" ? "ok" : f.status === "check" ? "warn" : "tag"}>
-                  {f.status === "fits" ? "Fits" : f.status === "check" ? "Check" : f.status === "no" ? "Too small" : "?"}
+                  {f.status === "fits" ? (cargoConfirmed ? "Fits" : "Fits (unconfirmed)") : f.status === "check" ? "Check" : f.status === "no" ? "Too small" : "Unknown"}
                 </Badge>
               </label>
             );
@@ -395,21 +404,29 @@ function QuotesSection({ deal, quotes, packages }: { deal: DealDoc; quotes: Quot
             <Button
               size="sm"
               className="flex-1"
-              disabled={!picked.length}
+              disabled={!picked.length || requesting || !quotable || !cargoConfirmed}
               onClick={async () => {
-                const r = await run(
-                  request({
-                    actor: actorNow(),
-                    dealId: deal._id,
-                    expectedVersion: deal.version,
-                    services: picked.map((key) => ({ key, specialRequests: [] })),
-                  }),
-                );
-                if (r) setPicked([]);
+                setRequesting(true);
+                try {
+                  const r = await run(
+                    request({
+                      actor: actorNow(),
+                      dealId: deal._id,
+                      expectedVersion: deal.version,
+                      services: picked.map((key) => ({ key, specialRequests: [] })),
+                    }),
+                  );
+                  if (r) {
+                    setPicked([]);
+                    if (r.reused || r.inFlight) toast.info(`${r.requested} requested · ${r.reused} still-valid quote(s) reused · ${r.inFlight} already in progress`);
+                  }
+                } finally {
+                  setRequesting(false);
+                }
               }}
             >
-              <TruckIcon data-icon="inline-start" />
-              Get sandbox estimates
+              {requesting ? <Spinner data-icon="inline-start" /> : <TruckIcon data-icon="inline-start" />}
+              Get sandbox quotes
             </Button>
             <Button size="sm" variant="outline" onClick={() => setManual(!manual)}>
               Add quote
@@ -535,7 +552,7 @@ function QuoteRow({
           {q.status === "pending" ? (
             <Spinner />
           ) : q.status === "error" ? (
-            <span className="max-w-[140px] truncate text-[11.5px] text-dispatch">{q.error?.message ?? "Failed"}</span>
+            <span className="text-[11.5px] text-dispatch">Failed</span>
           ) : (
             <>
               <span className="font-mono text-[14px] font-semibold tabular-nums">
@@ -549,6 +566,19 @@ function QuoteRow({
           )}
         </span>
       </div>
+      {q.status === "ok" && (
+        <span className="font-mono text-[10.5px] text-faint">
+          {q.currency ?? "currency not returned"} · requested {new Date(q.requestedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          {q.expiresAt ? ` · expires ${new Date(q.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : " · no expiry returned (treated as expired)"}
+        </span>
+      )}
+      {q.status === "ok" && breakdownLines(q.breakdownRaw).length > 0 && (
+        <details className="text-[11px] text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+          <summary className="cursor-pointer">Price breakdown (as returned)</summary>
+          {breakdownLines(q.breakdownRaw).map((b) => <div key={b.name} className="flex justify-between font-mono"><span>{b.name}</span><span>{fmtRM(b.sen)}</span></div>)}
+        </details>
+      )}
+      {q.status === "error" && q.error && <span className="text-[11.5px] text-dispatch">{q.error.message}</span>}
       {q.reference && <span className="text-[11.5px] text-muted-foreground">Reference: {q.reference}</span>}
       {q.terms && <span className="text-[11.5px] text-muted-foreground">{q.terms}</span>}
       {needsUnloading && (role === "sales" || role === "owner") && (

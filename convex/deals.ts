@@ -2,7 +2,7 @@
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx } from "./_generated/server";
-import { actor, loc } from "./schema";
+import { actor, loc, pkg } from "./schema";
 import { audit, fail, nextCode, skuByCode } from "./lib";
 import { getActor } from "./access";
 
@@ -160,6 +160,52 @@ export const confirmDestination = mutation({
     await ctx.db.patch("deals", dealId, { stateVersion: (deal.stateVersion ?? 0) + 1, destination: { ...deal.destination, confirmedBy: actor.name }, updatedAt: Date.now() });
     await audit(ctx, actor, "confirm_location", `deal:${dealId}`, deal.destination.label);
     return null;
+  },
+});
+
+/**
+ * Staff confirm (or correct) the packages of one unit for this shipment, naming where the measurements came
+ * from. A new version: older quotes go stale and the fit check must be repeated.
+ */
+export const setCargo = mutation({
+  args: {
+    actor,
+    dealId: v.id("deals"),
+    expectedVersion: v.number(),
+    packages: v.array(pkg),
+    source: v.union(v.literal("receipt"), v.literal("catalogue"), v.literal("staff")),
+    receiptId: v.optional(v.id("receipts")),
+    lineKey: v.optional(v.string()),
+  },
+  handler: async (ctx, { dealId, expectedVersion, packages, source, receiptId, lineKey }) => {
+    const actor = await getActor(ctx, "owner", "sales", "warehouse");
+    const deal = await load(ctx, dealId, expectedVersion);
+    editable(deal);
+    if (!packages.length || packages.length > 20) fail("Enter 1–20 packages per unit");
+    const ok = (n: number, max: number) => Number.isFinite(n) && n > 0 && n <= max;
+    if (packages.some((p) => !ok(p.lCm, 2000) || !ok(p.wCm, 2000) || !ok(p.hCm, 2000) || !ok(p.kg, 10_000))) fail("Every package needs a positive length, width and height in cm and weight in kg; measure anything unknown");
+    if (source === "receipt") {
+      const batch = (await ctx.db.get("batches", deal.batchId)) ?? fail("Batch not found");
+      if (!receiptId || !lineKey || batch.receiptId !== receiptId) fail("Receipt measurements must come from this stock's own receipt");
+      const receipt = (await ctx.db.get("receipts", receiptId)) ?? fail("Receipt not found");
+      const line = receipt.lines.find((l) => l.key === lineKey);
+      if (!line || line.skuCode !== deal.skuCode) fail("That receipt line is not for this item");
+    } else if (receiptId || lineKey) fail("Only receipt measurements reference a receipt line");
+    const round = (n: number) => Math.round(n * 100) / 100;
+    const cargo = {
+      packages: packages.map((p) => ({ lCm: round(p.lCm), wCm: round(p.wCm), hCm: round(p.hCm), kg: round(p.kg) })),
+      source,
+      ...(source === "receipt" ? { receiptId, lineKey } : {}),
+      confirmedBy: actor.name,
+      confirmedAt: Date.now(),
+    };
+    await ctx.db.patch("deals", dealId, {
+      cargo, fitConfirmedBy: undefined, proposal: undefined, decision: undefined,
+      status: deal.buyer?.name.trim() ? "offer_ready" : "finding_buyer",
+      version: deal.version + 1, stateVersion: (deal.stateVersion ?? 0) + 1, updatedAt: Date.now(),
+    });
+    await audit(ctx, actor, "cargo", `deal:${dealId}`, `${packages.length} package(s) per unit · ${source}`);
+    return deal.version + 1;
   },
 });
 

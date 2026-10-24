@@ -221,6 +221,15 @@ export default defineSchema({
     freightPayer: v.union(v.literal("merchant"), v.literal("buyer")),
     packingSen: v.number(),
     fitConfirmedBy: v.optional(v.string()),
+    /** Packages of ONE unit as confirmed by staff, with where the measurements came from. */
+    cargo: v.optional(v.object({
+      packages: v.array(pkg),
+      source: v.union(v.literal("receipt"), v.literal("catalogue"), v.literal("staff")),
+      receiptId: v.optional(v.id("receipts")),
+      lineKey: v.optional(v.string()),
+      confirmedBy: v.string(),
+      confirmedAt: v.number(),
+    })),
     version: v.number(),
     stateVersion: v.optional(v.number()),
     proposal: v.optional(

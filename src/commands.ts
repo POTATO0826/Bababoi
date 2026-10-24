@@ -58,7 +58,26 @@ export function agentCommandOf(text: string): AgentCommandId | null {
 }
 
 /** Text that looks like an API key or token: never recorded in chat or sent to a model. */
-export const looksLikeSecret = (text: string) => /sk-ant-[A-Za-z0-9_-]{8,}|\bsk-[A-Za-z0-9_-]{24,}|\bsk_(live|test)_[A-Za-z0-9]{10,}/.test(text);
+export const looksLikeSecret = (text: string) => /sk-ant-[A-Za-z0-9_-]{8,}|\bsk-[A-Za-z0-9_-]{24,}|\b(sk|pk)_(live|test)_[A-Za-z0-9]{10,}/.test(text);
+
+/**
+ * Slash-menu suggestions for what was typed after "/". An exact command id wins, then ids and labels that start
+ * with the text, then any other match (including keywords); ties keep the menu's own order.
+ */
+export function rankCommands<T extends { id: string; label: string; keywords: readonly string[] }>(items: readonly T[], typed: string): T[] {
+  const q = typed.trim().toLowerCase();
+  const score = (c: T) => {
+    const id = c.id.toLowerCase(), label = c.label.toLowerCase();
+    if (!q) return 3;
+    if (id === q) return 0;
+    if (id.startsWith(q)) return 1;
+    if (label.startsWith(q)) return 2;
+    if (id.includes(q) || label.includes(q)) return 3;
+    if (c.keywords.some((k) => k.toLowerCase().includes(q))) return 4;
+    return -1;
+  };
+  return items.map((c, i) => ({ c, i, s: score(c) })).filter((x) => x.s >= 0).sort((a, b) => a.s - b.s || a.i - b.i).map((x) => x.c);
+}
 
 export const commandById = (id: string) => COMMANDS.find((c) => c.id === id);
 

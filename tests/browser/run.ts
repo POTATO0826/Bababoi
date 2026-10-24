@@ -13,6 +13,8 @@ import { join } from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import { agentStatus, readDeliveryEvidence, runAnalystTurn, setModelResolverForTests, setWebLoginForTests, webLogin, webLogout } from "../../src/local/agent";
 import { generateDemoKeys } from "../../src/local/demo-identity";
+import { setLalamoveFetchForTests } from "../../src/local/lalamove";
+import { MOCK_KEY as LALAMOVE_MOCK_KEY, MOCK_SECRET as LALAMOVE_MOCK_SECRET, mockLalamove } from "../../src/local/lalamove-mock";
 import { localDemoRoutes } from "../../src/local/routes";
 import { mockedPi, syntheticSnapshot } from "../../src/local/test-fixtures";
 
@@ -51,6 +53,10 @@ if (!live) {
   ];
   faux.setResponses([...script(), ...script(), ...script()]);
 }
+
+// Lalamove is always the MOCKED sandbox here (signature-checking stand-in): never live Lalamove evidence.
+const lalamoveMock = mockLalamove();
+setLalamoveFetchForTests(lalamoveMock.fetch);
 
 // Build the harness page with the same browser settings the demo server uses.
 const out = mkdtempSync(join(tmpdir(), "wareorb-harness-"));
@@ -172,10 +178,16 @@ try {
   await input.press("Enter");
   check(await page.getByRole("alert").filter({ hasText: /Jarvis is logged out/i }).last().waitFor({ timeout: 10_000 }).then(() => true, () => false), "after logout a question is refused (no fallback, no old key)");
 
-  // 7. Ordinary warehouse commands still work locally.
+  // 7. Ordinary warehouse commands still work locally; an exact command wins over partial matches.
   await input.fill("/replenish");
   await input.press("Enter");
   check(await page.getByText("Replenish is open.").last().isVisible(), "/replenish still opens its panel");
+  await input.fill("/delivery");
+  check((await page.getByRole("option").first().innerText()).includes("/delivery"), "/delivery is the first suggestion for /delivery");
+  await input.press("Enter");
+  const deliveryOpened = await page.getByText("Delivery quotes is open.").last().waitFor({ timeout: 5_000 }).then(() => true, () => false);
+  if (!deliveryOpened) { await page.screenshot({ path: join(shots, "delivery-command.png") }); console.log(`INFO  draft after Enter: ${JSON.stringify(await input.inputValue())}; transcript tail: ${JSON.stringify((await page.locator("aside[aria-label='Jarvis']").innerText()).slice(-300))}`); }
+  check(deliveryOpened, "/delivery + Enter opens Delivery quotes");
 
   // 8. Reconnect with /login (Enter on the suggestion) and refresh: still connected while the server runs.
   await input.fill("/log");
@@ -191,6 +203,42 @@ try {
   await page.getByRole("button", { name: "Log out", exact: true }).waitFor({ timeout: 15_000 });
   check(true, "reconnected, and still connected after a page refresh");
   check(!(await secretsVisible(validKey)), "the key is not in the refreshed page or browser storage");
+
+  // 9. Lalamove sandbox connection (MOCKED Lalamove): masked fields, wrong secret refused, connect, disconnect.
+  console.log("INFO  Lalamove: MOCKED sandbox (signature-checking stand-in, not live Lalamove)");
+  const card = page.getByRole("status", { name: "Lalamove connection" });
+  await card.getByText("Lalamove not connected").waitFor({ timeout: 10_000 });
+  check(true, "the Lalamove card starts disconnected");
+  await card.getByRole("button", { name: "Connect" }).click();
+  const llKey = page.locator("#lalamove-key"), llSecret = page.locator("#lalamove-secret");
+  await llKey.waitFor();
+  check(await llKey.getAttribute("type") === "password" && await llSecret.getAttribute("type") === "password", "the Lalamove key and secret fields are masked");
+  check(await page.evaluate(() => document.activeElement?.id) === "lalamove-key", "focus moves to the Lalamove key field");
+  const wrongSecret = "sk_test_WRONGBROWSERSECRET000000000000000000000";
+  await llKey.fill(LALAMOVE_MOCK_KEY);
+  await llSecret.fill(wrongSecret);
+  await dialog.getByRole("button", { name: "Connect" }).click();
+  const llAlert = dialog.getByRole("alert");
+  await llAlert.waitFor({ timeout: 10_000 });
+  check(/rejected/i.test(await llAlert.innerText()), `a wrong secret shows a useful error ("${(await llAlert.innerText()).slice(0, 80)}")`);
+  check(!(await secretsVisible(wrongSecret.slice(8), LALAMOVE_MOCK_KEY.slice(8))), "the typed Lalamove values are not in the page or browser storage");
+  await llSecret.fill(LALAMOVE_MOCK_SECRET);
+  await dialog.getByRole("button", { name: "Connect" }).click();
+  await card.getByText("Connected · Lalamove sandbox").waitFor({ timeout: 10_000 });
+  check(await dialog.waitFor({ state: "hidden", timeout: 5_000 }).then(() => true, () => false), "valid sandbox keys connect and the form closes");
+  check(/MY · 4 vehicle types/.test(await card.innerText()), "the card shows the market and vehicle count from Lalamove");
+  check(!(await secretsVisible(LALAMOVE_MOCK_KEY.slice(8), LALAMOVE_MOCK_SECRET.slice(8))), "the Lalamove key and secret are not in the page or browser storage");
+  check(await page.getByRole("button", { name: "Log out", exact: true }).isVisible(), "connecting Lalamove leaves Jarvis's Claude connection as it was");
+  await page.screenshot({ path: join(shots, "lalamove-connected.png") });
+  await card.getByRole("button", { name: "Test connection" }).click();
+  await page.waitForTimeout(300);
+  const llCalls = lalamoveMock.calls;
+  check(llCalls.every((c) => c.method === "GET" && c.url === "https://rest.sandbox.lalamove.com/v3/cities" && c.market === "MY"), `only GET /v3/cities on the sandbox was called (${llCalls.length} calls; no orders)`);
+  check(llCalls.map((c) => c.signed).join() === "false,true,true", "the wrong secret failed its signature; the valid keys signed connect and test");
+  await card.getByRole("button", { name: "Disconnect" }).click();
+  await card.getByText("Lalamove not connected").waitFor({ timeout: 10_000 });
+  check(true, "Disconnect returns the card to not connected");
+  check(await page.getByRole("button", { name: "Log out", exact: true }).isVisible(), "disconnecting Lalamove does not log Jarvis out");
 
   // The complete app boots (no blank page): without the local Convex sync server it waits at its access screen.
   const app = await browser.newPage({ viewport: { width: 1200, height: 800 } });

@@ -6,6 +6,8 @@ import { LOCAL_DEMO_AUDIENCE, LOCAL_DEMO_ISSUER, LOCAL_DEMO_PRESENTER } from "..
 import { readDeliveryEvidence, runAnalystTurn, setModelResolverForTests, setWebLoginForTests, agentStatus, webLogin, webLogout, type AgentEvent } from "./agent";
 import { streamAgentChat } from "./agent-client";
 import { generateDemoKeys } from "./demo-identity";
+import * as lalamove from "./lalamove";
+import { MOCK_KEY, MOCK_SECRET, mockLalamove } from "./lalamove-mock";
 import { localDemoRoutes, type AgentOps } from "./routes";
 import { mockedPi, syntheticSnapshot } from "./test-fixtures";
 
@@ -222,6 +224,126 @@ describe("web login routes (mocked key check and provider)", () => {
       const events: AgentEvent[] = [];
       await streamAgentChat({ sessionId: "after-logout-session", text: "stock?", fetchImpl: (((i: string, init?: RequestInit) => fetch(`${base}${i}`, { ...init, headers: { ...(init?.headers as Record<string, string>), Origin: base } })) as typeof fetch) }, (e) => events.push(e));
       expect(events).toEqual([{ type: "error", message: expect.stringContaining("logged out"), setup: true }]);
+    } finally { server.stop(true); }
+  });
+});
+
+describe("Lalamove sandbox routes (MOCKED Lalamove; not live evidence)", () => {
+  const post = (base: string, path: string, body: string, headers: Record<string, string> = {}) =>
+    fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Origin: base, ...headers }, body });
+  const creds = JSON.stringify({ environment: "sandbox", market: "MY", apiKey: MOCK_KEY, apiSecret: MOCK_SECRET });
+  afterEach(() => { lalamove.disconnectLalamove(); lalamove.setLalamoveFetchForTests(null); });
+
+  test("only this exact page, with JSON and small bodies, may connect, test, list or disconnect", async () => {
+    const m = mockLalamove();
+    lalamove.setLalamoveFetchForTests(m.fetch);
+    const { server, base } = serve();
+    const port = new URL(base).port;
+    try {
+      const refused: Record<string, string>[] = [
+        { Origin: "https://evil.example" },
+        { Origin: `https://127.0.0.1:${port}` },
+        { Origin: `http://127.0.0.1:${Number(port) + 1}` },
+        { Origin: `http://localhost:${port}` },
+        { Host: "evil.example" },
+        { "Content-Type": "text/plain" },
+      ];
+      for (const headers of refused) {
+        for (const path of ["/api/lalamove/connect", "/api/lalamove/test", "/api/lalamove/services", "/api/lalamove/disconnect"]) expect((await post(base, path, creds, headers)).status).toBe(403);
+      }
+      expect((await fetch(`${base}/api/lalamove/connect`, { method: "POST", headers: { "Content-Type": "application/json" }, body: creds })).status).toBe(403);
+      expect((await fetch(`${base}/api/lalamove/status`, { headers: { Origin: "https://evil.example" } })).status).toBe(403);
+      expect((await post(base, "/api/lalamove/connect", JSON.stringify({ apiKey: MOCK_KEY, apiSecret: MOCK_SECRET, pad: "x".repeat(5000) }))).status).toBe(413);
+      expect((await post(base, "/api/lalamove/connect", JSON.stringify({ environment: "production", apiKey: MOCK_KEY, apiSecret: MOCK_SECRET }))).status).toBe(400);
+      expect((await post(base, "/api/lalamove/connect", JSON.stringify({ market: "SG", apiKey: MOCK_KEY, apiSecret: MOCK_SECRET }))).status).toBe(400);
+      expect((await post(base, "/api/lalamove/connect", "not json")).status).toBe(400);
+      // Nothing reached Lalamove and nothing connected.
+      expect(m.calls).toEqual([]);
+      expect(lalamove.lalamoveStatus().connected).toBe(false);
+    } finally { server.stop(true); }
+  });
+
+  test("connect, test, services and disconnect over HTTP; responses never contain the key or secret and are not cached", async () => {
+    const m = mockLalamove();
+    lalamove.setLalamoveFetchForTests(m.fetch);
+    const { server, base } = serve();
+    try {
+      const wrong = await post(base, "/api/lalamove/connect", JSON.stringify({ apiKey: MOCK_KEY, apiSecret: "sk_test_MOCKWRONGSECRET000000000000000000000" }));
+      expect(wrong.status).toBe(422);
+      expect(wrong.headers.get("cache-control")).toBe("no-store");
+      const wrongText = await wrong.text();
+      expect(wrongText).not.toContain("MOCKWRONGSECRET");
+      expect(wrongText).not.toContain(MOCK_KEY);
+      expect(JSON.parse(wrongText)).toMatchObject({ ok: false, error: expect.stringContaining("rejected"), status: { connected: false } });
+
+      const ok = await post(base, "/api/lalamove/connect", creds);
+      expect(ok.status).toBe(200);
+      const okText = await ok.text();
+      for (const secret of [MOCK_KEY, MOCK_SECRET]) expect(okText).not.toContain(secret);
+      expect(JSON.parse(okText)).toMatchObject({ ok: true, status: { connected: true, environment: "sandbox", market: "MY" } });
+
+      const status = await fetch(`${base}/api/lalamove/status`);
+      expect(status.headers.get("cache-control")).toBe("no-store");
+      const statusText = await status.text();
+      for (const secret of [MOCK_KEY, MOCK_SECRET]) expect(statusText).not.toContain(secret);
+      expect(JSON.parse(statusText)).toMatchObject({ connected: true });
+
+      const tested = await post(base, "/api/lalamove/test", "{}");
+      expect(await tested.json()).toMatchObject({ ok: true, status: { connected: true } });
+      const services = await (await post(base, "/api/lalamove/services", JSON.stringify({ refresh: true }))).json() as { source: string; services: { key: string }[] };
+      expect(services.source).toBe("lalamove");
+      expect(services.services.map((x) => x.key)).toContain("VAN");
+
+      const out = await post(base, "/api/lalamove/disconnect", "{}");
+      expect(await out.json()).toMatchObject({ ok: true, status: { connected: false } });
+      expect(await (await post(base, "/api/lalamove/services", "{}")).json()).toMatchObject({ source: "none", services: [] });
+      // Only the allowlisted sandbox endpoints were called, each one signed.
+      for (const c of m.calls) {
+        expect(c.url.startsWith(`${lalamove.SANDBOX_URL}/v3/`)).toBe(true);
+        expect(c.path).not.toContain("/orders");
+      }
+    } finally { server.stop(true); }
+  });
+
+  test("the Convex quote bridge requires the bridge secret and a valid job; a disconnected Lalamove is a failure, not a price", async () => {
+    lalamove.setLalamoveFetchForTests(mockLalamove().fetch);
+    const { server, base } = serve();
+    const job = { service: "VAN", specialRequests: [], qty: 1, cargo: [{ lCm: 120, wCm: 80, hCm: 60, kg: 40 }], stops: [{ lat: 3.0733, lng: 101.5185, address: "Seksyen 15, 40200 Shah Alam" }, { lat: 3.1185, lng: 101.6223, address: "SS2, 47300 Petaling Jaya" }] };
+    const bridge = (auth: string, body: unknown, host?: string) => fetch(`${base}/internal/lalamove/quote`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json", ...(host ? { Host: host } : {}) }, body: typeof body === "string" ? body : JSON.stringify(body) });
+    try {
+      expect((await bridge("Bearer wrong", job)).status).toBe(401);
+      expect((await bridge(`Bearer ${SECRET}`, job, "evil.example")).status).toBe(401);
+      expect((await bridge(`Bearer ${SECRET}`, { ...job, service: "../v3/orders" })).status).toBe(400);
+      expect((await bridge(`Bearer ${SECRET}`, "not json")).status).toBe(400);
+      expect((await bridge(`Bearer ${SECRET}`, { ...job, pad: "x".repeat(20_000) })).status).toBe(413);
+      const disconnected = await bridge(`Bearer ${SECRET}`, job);
+      expect(disconnected.status).toBe(422);
+      expect(await disconnected.json()).toMatchObject({ error: { kind: "auth" } });
+      expect((await lalamove.connectLalamove(MOCK_KEY, MOCK_SECRET)).ok).toBe(true);
+      const quoted = await bridge(`Bearer ${SECRET}`, job);
+      expect(quoted.status).toBe(200);
+      expect(await quoted.json()).toMatchObject({ ok: { quotationId: "1514140994227007571", totalSen: 5050, currency: "MYR" } });
+    } finally { server.stop(true); }
+  });
+
+  test("the Claude and Lalamove connections are independent", async () => {
+    const KEY = "sk-ant-api03-MOCK-INDEPENDENT-KEY-for-tests-0001";
+    const { resolved } = await mockedPi();
+    setModelResolverForTests(async () => ({ error: "No agent provider is configured. (mocked)" }));
+    setWebLoginForTests({ runtime: async () => resolved, verify: async (key) => (key === KEY ? { ok: true } : { ok: false, error: "rejected" }) });
+    lalamove.setLalamoveFetchForTests(mockLalamove().fetch);
+    const { server, base } = serve();
+    try {
+      expect((await post(base, "/api/agent/login", JSON.stringify({ provider: "anthropic", apiKey: KEY }))).status).toBe(200);
+      expect((await post(base, "/api/lalamove/connect", creds)).status).toBe(200);
+      await post(base, "/api/agent/logout", "{}");
+      expect(await (await fetch(`${base}/api/agent/status`)).json()).toMatchObject({ ready: false });
+      expect(await (await fetch(`${base}/api/lalamove/status`)).json()).toMatchObject({ connected: true });
+      expect((await post(base, "/api/agent/login", JSON.stringify({ provider: "anthropic", apiKey: KEY }))).status).toBe(200);
+      await post(base, "/api/lalamove/disconnect", "{}");
+      expect(await (await fetch(`${base}/api/lalamove/status`)).json()).toMatchObject({ connected: false });
+      expect(await (await fetch(`${base}/api/agent/status`)).json()).toMatchObject({ ready: true });
+      await post(base, "/api/agent/logout", "{}");
     } finally { server.stop(true); }
   });
 });

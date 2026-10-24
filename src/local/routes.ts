@@ -8,6 +8,8 @@ import { agentStatus as realAgentStatus, readDeliveryEvidence as realRead, runAn
 import { mintDemoToken } from "./demo-identity";
 import { loopbackUrl } from "./isolation";
 import { warehouseTools, type Snapshot } from "./warehouse-tools";
+import { deliveryTools, type DeliveryBackend, type QuoteRecord } from "./delivery-tools";
+import * as realLalamove from "./lalamove";
 
 export interface LocalDemoConfig {
   port: number;
@@ -29,14 +31,31 @@ export interface AgentOps {
   logout(): Promise<AgentStatus>;
   /** Fresh ledger snapshot for the warehouse tools. */
   snapshot?: () => Promise<Snapshot | null>;
+  /** Lalamove sandbox connection (memory only); tests pass a labelled mock. */
+  lalamove?: LalamoveOps;
+  /** Delivery records for Jarvis's delivery tools; tests pass a mock. */
+  delivery?: DeliveryBackend;
 }
+
+export interface LalamoveOps {
+  status: typeof realLalamove.lalamoveStatus;
+  connect: typeof realLalamove.connectLalamove;
+  disconnect: typeof realLalamove.disconnectLalamove;
+  test: typeof realLalamove.testLalamove;
+  services: typeof realLalamove.lalamoveServices;
+  quote: typeof realLalamove.requestLalamoveQuote;
+}
+const defaultLalamove: LalamoveOps = {
+  status: realLalamove.lalamoveStatus, connect: realLalamove.connectLalamove, disconnect: realLalamove.disconnectLalamove,
+  test: realLalamove.testLalamove, services: realLalamove.lalamoveServices, quote: realLalamove.requestLalamoveQuote,
+};
 
 const noStore = { "Cache-Control": "no-store" };
 const deny = (status: number, error: string) => Response.json({ error }, { status, headers: noStore });
 /** SSE comment line keeping the connection busy while the model thinks. */
 const HEARTBEAT_MS = 8_000;
 /** Request body limits (bytes). */
-const MAX_JSON = { chat: 16_384, auth: 4_096, extract: 40 * 1024 * 1024 } as const;
+const MAX_JSON = { chat: 16_384, auth: 4_096, quote: 16_384, extract: 40 * 1024 * 1024 } as const;
 
 /** Read a JSON body no larger than `max` bytes; null when too large or not JSON. */
 async function readJson(req: Request, max: number): Promise<{ value: unknown } | { tooLarge: true } | null> {
@@ -70,12 +89,26 @@ export function localDemoRoutes(cfg: LocalDemoConfig, ops: AgentOps = { agentSta
     const expected = Buffer.from(`Bearer ${cfg.agentSecret}`);
     return given.length === expected.length && timingSafeEqual(given, expected);
   };
-  /** The agent reads through the same authorised query as the presenter's screen. */
-  const snapshot = ops.snapshot ?? (async () => {
+  /** The agent reads and acts through the same authorised functions as the presenter's screen. */
+  const presenter = async () => {
     const client = new ConvexHttpClient(convexUrl);
     client.setAuth((await mintDemoToken(cfg.privateJwk, LOCAL_DEMO_PRESENTER, 300)).token);
-    return await client.query(api.ledger.snapshot, { since: 0 });
-  });
+    return client;
+  };
+  const snapshot = ops.snapshot ?? (async () => await (await presenter()).query(api.ledger.snapshot, { since: 0 }));
+  const lalamove = ops.lalamove ?? defaultLalamove;
+  const delivery: DeliveryBackend = ops.delivery ?? {
+    snapshot,
+    quotes: async (dealId) => (await (await presenter()).query(api.quotes.forDeal, { dealId: dealId as never })) as QuoteRecord[],
+    receipt: async (receiptId) => {
+      const r = await (await presenter()).query(api.receiving.get, { receiptId: receiptId as never });
+      return r ? { id: r._id, lines: r.lines } : null;
+    },
+    requestQuotes: async (dealId, expectedVersion, services) =>
+      await (await presenter()).mutation(api.quotes.request, { actor: { role: "owner", name: LOCAL_DEMO_PRESENTER.name }, dealId: dealId as never, expectedVersion, services }),
+    lalamove: { status: () => lalamove.status(), services: () => lalamove.services() },
+  };
+  const tools = () => [...warehouseTools(snapshot), ...deliveryTools(delivery)];
 
   return {
     "/api/demo/token": {
@@ -109,7 +142,7 @@ export function localDemoRoutes(cfg: LocalDemoConfig, ops: AgentOps = { agentSta
             };
             const emit = (e: AgentEvent) => send(`data: ${JSON.stringify(e)}\n\n`);
             heartbeat = setInterval(() => send(": keep-alive\n\n"), HEARTBEAT_MS);
-            try { await ops.runAnalystTurn(sessionId, text, () => warehouseTools(snapshot), emit, abort.signal); }
+            try { await ops.runAnalystTurn(sessionId, text, tools, emit, abort.signal); }
             catch (e) {
               console.warn(`[agent] chat route failed: ${e instanceof Error ? e.message.slice(0, 300) : String(e)}`);
               emit({ type: "error", message: "Jarvis couldn't answer this time. Ask again." });
@@ -147,6 +180,53 @@ export function localDemoRoutes(cfg: LocalDemoConfig, ops: AgentOps = { agentSta
         const read = await readJson(req, MAX_JSON.auth);
         if (read && "tooLarge" in read) return deny(413, "This request is too large.");
         return Response.json({ ok: true, status: await ops.logout() }, { headers: noStore });
+      },
+    },
+    "/api/lalamove/status": {
+      GET: async (req: Request) => (fromThisApp(req) ? Response.json(lalamove.status(), { headers: noStore }) : deny(403, "This page can only be used from the WareOrb demo on this computer.")),
+    },
+    "/api/lalamove/connect": {
+      POST: async (req: Request) => {
+        if (!mutationFromThisApp(req)) return deny(403, "This page can only be used from the WareOrb demo on this computer.");
+        const read = await readJson(req, MAX_JSON.auth);
+        if (read && "tooLarge" in read) return deny(413, "This request is too large.");
+        const body = (read?.value ?? null) as { apiKey?: unknown; apiSecret?: unknown; market?: unknown; environment?: unknown } | null;
+        if (!body || typeof body !== "object" || (body.market ?? "MY") !== "MY" || (body.environment ?? "sandbox") !== "sandbox") return deny(400, "Only the Lalamove sandbox for Malaysia is supported.");
+        // The key and secret live only in this request and the server's memory; never logged or returned.
+        const r = await lalamove.connect(body.apiKey, body.apiSecret, req.signal);
+        return Response.json(r.ok ? { ok: true, status: r.status } : { ok: false, error: r.error, status: r.status }, { status: r.ok ? 200 : 422, headers: noStore });
+      },
+    },
+    "/api/lalamove/test": {
+      POST: async (req: Request) => {
+        if (!mutationFromThisApp(req)) return deny(403, "This page can only be used from the WareOrb demo on this computer.");
+        const r = await lalamove.test(req.signal);
+        return Response.json(r.ok ? { ok: true, status: r.status } : { ok: false, error: r.error, status: r.status }, { status: r.ok ? 200 : 422, headers: noStore });
+      },
+    },
+    "/api/lalamove/disconnect": {
+      POST: async (req: Request) => {
+        if (!mutationFromThisApp(req)) return deny(403, "This page can only be used from the WareOrb demo on this computer.");
+        return Response.json({ ok: true, status: lalamove.disconnect() }, { headers: noStore });
+      },
+    },
+    "/api/lalamove/services": {
+      POST: async (req: Request) => {
+        if (!mutationFromThisApp(req)) return deny(403, "This page can only be used from the WareOrb demo on this computer.");
+        const read = await readJson(req, MAX_JSON.auth);
+        const refresh = !!(read && "value" in read && (read.value as { refresh?: unknown } | null)?.refresh === true);
+        return Response.json(await lalamove.services({ refresh }), { headers: noStore });
+      },
+    },
+    "/internal/lalamove/quote": {
+      POST: async (req: Request) => {
+        if (!hosts.has(req.headers.get("host") ?? "") || !fromBackend(req)) return deny(401, "Unauthorised");
+        const read = await readJson(req, MAX_JSON.quote);
+        if (read && "tooLarge" in read) return deny(413, "This request is too large.");
+        const job = realLalamove.parseQuoteJob(read && "value" in read ? read.value : null);
+        if (!job) return Response.json({ error: { kind: "invalid", message: "The quote request was incomplete. Check the shipment details." } }, { status: 400, headers: noStore });
+        const r = await lalamove.quote(job);
+        return Response.json(r, { status: "ok" in r ? 200 : 422, headers: noStore });
       },
     },
     "/internal/extract-receipt": {

@@ -44,8 +44,10 @@ export function quotationBody(input: { service: string; specialRequests: string[
 
 export interface ParsedQuote {
   quotationId: string;
-  expiresAt: number;
-  currency: string;
+  /** Only the expiry Lalamove returned; a quote without one is treated as expired. */
+  expiresAt?: number;
+  /** Only the currency Lalamove returned. */
+  currency?: string;
   totalSen: number;
   breakdownRaw: string;
 }
@@ -54,15 +56,30 @@ export function parseQuotation(json: unknown): ParsedQuote | null {
   const d = (json as { data?: Record<string, unknown> } | null)?.data;
   const pb = d?.priceBreakdown as Record<string, unknown> | undefined;
   const total = parseAmount(pb?.total);
-  if (!d || !pb || total == null || typeof d.quotationId !== "string") return null;
+  if (!d || !pb || total == null || total <= 0 || typeof d.quotationId !== "string") return null;
   const expires = typeof d.expiresAt === "string" ? Date.parse(d.expiresAt) : Number.NaN;
   return {
     quotationId: d.quotationId,
-    expiresAt: Number.isFinite(expires) ? expires : Date.now() + 5 * 60_000,
-    currency: typeof pb.currency === "string" ? pb.currency : "MYR",
+    ...(Number.isFinite(expires) ? { expiresAt: expires } : {}),
+    ...(typeof pb.currency === "string" && pb.currency ? { currency: pb.currency } : {}),
     totalSen: total,
     breakdownRaw: JSON.stringify(pb),
   };
+}
+
+/** Price breakdown lines as returned (amounts in sen), for display; unknown keys are kept by name. */
+export function breakdownLines(raw: string | undefined): { name: string; sen: number }[] {
+  if (!raw) return [];
+  try {
+    const pb = JSON.parse(raw) as Record<string, unknown>;
+    return Object.entries(pb).flatMap(([name, v]) => {
+      if (name === "currency" || name === "total") return [];
+      const sen = parseAmount(v);
+      return sen == null ? [] : [{ name, sen }];
+    });
+  } catch {
+    return [];
+  }
 }
 
 const toCm = (x: unknown) => {

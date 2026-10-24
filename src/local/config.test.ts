@@ -46,7 +46,7 @@ describe("the web server refuses unsafe demo configurations", () => {
 });
 
 describe("hosted mode has no local agent or auth routes", () => {
-  test("POST /api/agent/login, /api/agent/logout and GET /api/agent/status are not served", async () => {
+  test("the agent, login and Lalamove routes are not served", async () => {
     const port = 45_000 + Math.floor(Math.random() * 3_000);
     const p = Bun.spawn(["bun", "--no-env-file", "src/index.ts"], { cwd: root, env: { ...base, NODE_ENV: "production", PORT: String(port) }, stdout: "pipe", stderr: "pipe" });
     try {
@@ -60,7 +60,12 @@ describe("hosted mode has no local agent or auth routes", () => {
         expect(r.status).toBe(404);
         expect(await r.json()).toEqual({ error: "Not found" });
       }
+      for (const path of ["/api/lalamove/connect", "/api/lalamove/test", "/api/lalamove/disconnect", "/api/lalamove/services", "/internal/lalamove/quote", "/internal/extract-receipt"]) {
+        const r = await fetch(`${url}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Origin: url }, body: JSON.stringify({ apiKey: "pk_test_MOCKHOSTED00000000", apiSecret: "sk_test_MOCKHOSTED00000000" }) });
+        expect(r.status).toBe(404);
+      }
       expect((await fetch(`${url}/api/agent/status`)).status).toBe(404);
+      expect((await fetch(`${url}/api/lalamove/status`)).status).toBe(404);
       expect((await fetch(`${url}/api/demo/token`)).status).toBe(404);
       expect((await fetch(`${url}/`)).status).toBe(200);
     } finally {

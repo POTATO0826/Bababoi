@@ -36,6 +36,8 @@ const routes = {
   "/api/icon": () => Response.json({ error: "Use the authenticated catalogue workflow." }, { status: 410 }),
   // Unknown API paths (including the local demo's agent and auth routes in hosted mode) do not exist.
   "/api/*": () => Response.json({ error: "Not found" }, { status: 404, headers: { "Cache-Control": "no-store" } }),
+  // The local demo's backend bridge (receipt reading, Lalamove sandbox quotes) is never served by the hosted app.
+  "/internal/*": () => Response.json({ error: "Not found" }, { status: 404, headers: { "Cache-Control": "no-store" } }),
   "/healthz": () => Response.json({ service: "wareorb-frontend", status: "ok" }, { headers: { "Cache-Control": "no-store" } }),
 };
 

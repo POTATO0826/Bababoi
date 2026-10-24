@@ -47,7 +47,9 @@ export const request = mutation({
   handler: async (ctx, { dealId, expectedVersion, services }) => {
     const actor = await getActor(ctx, "owner", "sales");
     const deal = await quotableDeal(ctx, dealId, expectedVersion);
+    if (!deal.cargo) fail("Confirm the shipment measurements (packages, sizes and weights) before requesting quotes");
     if (!services.length || services.length > 4) fail("Pick 1–4 vehicles");
+    if (new Set(services.map((s) => s.key)).size !== services.length || services.some((s) => !/^[A-Z0-9_]{2,40}$/.test(s.key) || s.specialRequests.length > 10)) fail("Choose valid vehicle types");
     const now = Date.now();
     const out = { requested: 0, reused: 0, inFlight: 0 };
     for (const s of services) {
@@ -207,6 +209,8 @@ export const forFetch = internalQuery({
     if (!staff || staff.status !== "active" || !["owner", "sales"].includes(staff.role)) return null;
     return {
       service: quote.service,
+      qty: deal.qty,
+      cargo: deal.cargo?.packages ?? null,
       collectAt: deal.collectAt,
       stops: [
         { lat: WAREHOUSE.lat, lng: WAREHOUSE.lng, address: WAREHOUSE.address },
@@ -231,7 +235,7 @@ export const save = internalMutation({
   args: {
     quoteId: v.id("quotes"),
     ok: v.optional(
-      v.object({ quotationId: v.string(), expiresAt: v.number(), currency: v.string(), totalSen: v.number(), breakdownRaw: v.string() }),
+      v.object({ quotationId: v.string(), expiresAt: v.optional(v.number()), currency: v.optional(v.string()), totalSen: v.number(), breakdownRaw: v.string() }),
     ),
     error: v.optional(v.object({ kind: v.string(), message: v.string(), retryAfterMs: v.optional(v.number()) })),
     fallback: v.optional(v.boolean()),

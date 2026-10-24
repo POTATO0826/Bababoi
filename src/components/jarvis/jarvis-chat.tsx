@@ -4,7 +4,7 @@ import { closeAgent, logoutLocalAgent, newAgentConversation, openAgentLogin, ref
 import { AgentLoginDialog } from "@/components/jarvis/agent-login-dialog";
 import { Badge } from "@/components/ui/badge";
 import { localDemo } from "@/identity";
-import { agentCommands, commandsFor } from "@/commands";
+import { agentCommands, commandsFor, rankCommands } from "@/commands";
 import { modelLabel, providerLabel } from "@/local/agent-client";
 import { JarvisOrb, OrbStatus } from "@/components/jarvis/orb";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -55,8 +55,19 @@ export function JarvisChat({ drawer, className }: { drawer: boolean; className?:
   const slash = draft.startsWith("/") && !/\s/.test(draft);
   // Local demo: /login and /logout connect the AI provider; they are handled here, never sent to a model.
   const menu = [...(localDemo ? agentCommands(localAgent?.ready === true) : []), ...commandsFor(role)];
-  const cmds = slash ? menu.filter((c) => `${c.id} ${c.label} ${c.keywords.join(" ")}`.toLowerCase().includes(draft.slice(1).toLowerCase())) : [];
+  // An exact command (e.g. "/delivery") is first, so Enter runs it; arrows can still choose another.
+  const cmds = slash ? rankCommands(menu, draft.slice(1)) : [];
   const pick = cmds[Math.min(active, Math.max(0, cmds.length - 1))];
+
+  // The highlight follows the pointer only when it really moves: a menu appearing under a resting pointer
+  // must not replace what was typed (e.g. "/delivery" + Enter opening the item under the cursor).
+  const pointer = useRef<{ x: number; y: number } | null>(null);
+  const hover = (e: { clientX: number; clientY: number }, i: number) => {
+    const last = pointer.current;
+    pointer.current = { x: e.clientX, y: e.clientY };
+    if (last && last.x === e.clientX && last.y === e.clientY) return;
+    setActive(i);
+  };
 
   const send = (text: string) => {
     if (!text.trim()) return;
@@ -192,7 +203,7 @@ export function JarvisChat({ drawer, className }: { drawer: boolean; className?:
             <CommandList>
               <CommandGroup heading="Commands">
                 {cmds.map((c) => (
-                  <CommandItem key={c.id} value={c.id} onSelect={() => send(`/${c.id}`)} onMouseEnter={() => setActive(cmds.indexOf(c))}>
+                  <CommandItem key={c.id} value={c.id} onSelect={() => send(`/${c.id}`)} onMouseMove={(e) => hover(e, cmds.indexOf(c))}>
                     <c.icon />
                     <span className="font-mono text-muted-foreground">/{c.id}</span>
                     <span>{c.label}</span>

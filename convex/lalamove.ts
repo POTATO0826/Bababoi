@@ -1,10 +1,34 @@
 // Lalamove API v3 calls. Quotations only — WareOrb never places Lalamove orders (booking is simulated).
+// Local presentation mode: the credentials live only in the local WareOrb server's memory, so quote requests
+// go through its authenticated loopback bridge (like receipt reading); the secret never enters Convex.
+import type { FunctionArgs } from "convex/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, env, internalAction } from "./_generated/server";
 import { headers, mapError, parseQuotation, parseServices, quotationBody } from "../src/domain/lalamove";
 import type { VehicleSpec } from "../src/domain/vehicle";
 import { getActionActor } from "./access";
+import { localAgent } from "./localDemo";
+
+type QuoteResult = FunctionArgs<typeof internal.quotes.save>;
+
+/** Local mode: ask the local server (which holds the Lalamove connection) for one sandbox quotation. */
+async function quoteViaLocalServer(agent: { url: string; secret: string }, job: { service: string; specialRequests: string[]; collectAt?: number; qty: number; cargo: { lCm: number; wCm: number; hCm: number; kg: number }[] | null; stops: { lat: number; lng: number; address: string }[] }): Promise<Omit<QuoteResult, "quoteId">> {
+  let res: Response;
+  try {
+    res = await timed(`${agent.url}/internal/lalamove/quote`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${agent.secret}`, "Content-Type": "application/json" },
+      body: JSON.stringify(job),
+    }, 25_000);
+  } catch {
+    return { error: { kind: "unavailable", message: "The WareOrb server on this computer did not answer. Check that the demo is still running, then try again." } };
+  }
+  const body = (await res.json().catch(() => null)) as { ok?: QuoteResult["ok"]; error?: QuoteResult["error"] } | null;
+  if (res.ok && body?.ok) return { ok: body.ok };
+  if (body?.error && typeof body.error.message === "string") return { error: body.error };
+  return { error: { kind: "unavailable", message: `The quote could not be requested (error ${res.status}). Try again.` } };
+}
 
 const BASE = () => env.LALAMOVE_BASE_URL || "https://rest.sandbox.lalamove.com";
 const CITIES_KEY = "lalamove:cities:MY";
@@ -24,6 +48,18 @@ export const fetchQuote = internalAction({
   handler: async (ctx, { quoteId, specialRequests }) => {
     const job = await ctx.runQuery(internal.quotes.forFetch, { quoteId });
     if (!job) return null;
+    const agent = localAgent();
+    if (agent) {
+      const slot = await ctx.runMutation(internal.quotes.takeSlot, { name: "lalamoveQuote" });
+      if (!slot.ok) {
+        await ctx.runMutation(internal.quotes.save, { quoteId, error: { kind: "rate_limited", message: "Too many quote requests right now. Wait a moment and try again.", retryAfterMs: slot.retryAfter } });
+        return null;
+      }
+      // Real failures stay failures: no saved demo price is substituted in local mode.
+      const r = await quoteViaLocalServer(agent, { service: job.service, specialRequests, collectAt: job.collectAt, qty: job.qty, cargo: job.cargo, stops: job.stops });
+      await ctx.runMutation(internal.quotes.save, { quoteId, ...r, fallback: false });
+      return null;
+    }
     const key = env.LALAMOVE_API_KEY;
     const secret = env.LALAMOVE_API_SECRET;
     if (!key || !secret) {
