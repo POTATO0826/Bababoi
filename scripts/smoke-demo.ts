@@ -1,6 +1,6 @@
 // Start the real app twice in a disposable checkout, without operator credentials or shared data.
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, statSync, symlinkSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -121,9 +121,16 @@ try {
   await start();
   assert.equal(await snapshot(), first, "Restart must retain the local database instead of reseeding");
   await stop();
-  console.log(`[startup] ${process.platform}: first run, frontend, authenticated inventory, no inherited API keys, restart persistence and shutdown passed.`);
 } finally {
   await stop();
-  // Windows can briefly retain file locks after taskkill has released the listening ports.
-  rmSync(scratch, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  // Node handles Windows directory junctions and EBUSY retries; Bun's rmSync does not retry here.
+  const cleanup = Bun.spawn([
+    join(nodeDir, process.platform === "win32" ? "node.exe" : "node"), "-e",
+    "require('node:fs').rmSync(process.argv[1], { recursive: true, force: true, maxRetries: 20, retryDelay: 250 })",
+    scratch,
+  ], { cwd: root, env, stdin: "ignore", stdout: "ignore", stderr: "inherit" });
+  const timer = setTimeout(() => cleanup.kill(), 60000);
+  try { assert.equal(await cleanup.exited, 0, "Disposable test directory must be removed"); }
+  finally { clearTimeout(timer); }
 }
+console.log(`[startup] ${process.platform}: first run, frontend, authenticated inventory, no inherited API keys, restart persistence, shutdown and cleanup passed.`);
