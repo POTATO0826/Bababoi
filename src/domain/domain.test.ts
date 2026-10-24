@@ -5,7 +5,7 @@ import { flagBatches, netSalesBySku } from "./ageing";
 import { comparable, netRecovery, rankQuotes, type DealCostLike, type QuoteLike } from "./costs";
 import { suggest } from "./replenish";
 import { buildSeed } from "./seed";
-import { applyPick, batchQty, freeSlotSet, planPick, planPlacement, toSkuRecords } from "./stock";
+import { applyPick, batchQty, collectionPayload, freeSlotSet, planPick, planPlacement, toSkuRecords } from "./stock";
 import { DAY, type BatchLike, type MovementLike, type ReservationLike } from "./types";
 import { fit, piecesFor } from "./vehicle";
 import { packagesFor } from "./specs";
@@ -126,6 +126,13 @@ describe("replenishment (§7)", () => {
 });
 
 describe("stock", () => {
+  test("a collection retry compares equal regardless of client key and line order", () => {
+    const sent = collectionPayload([{ slot: "1A01", qty: 1 }, { slot: "1A00", qty: 2 }], 1_700_000_000_000, true);
+    const reordered = collectionPayload([{ qty: 2, slot: "1A00" }, { qty: 1, slot: "1A01" }], 1_700_000_000_000, true);
+    expect(reordered).toBe(sent);
+    expect(collectionPayload([{ slot: "1A00", qty: 1 }], 1_700_000_000_000, true)).not.toBe(sent);
+  });
+
   test("pick frees whole bays first (§8: A-1-01 freed, A-1-02 kept)", () => {
     const locs = [
       { slot: "1A00", qty: 2 },

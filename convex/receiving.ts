@@ -37,7 +37,11 @@ export const get = query({
     const evidence = await Promise.all(
       r.evidence.map(async (e) => ({ ...e, url: e.storageId ? await ctx.storage.getUrl(e.storageId) : null })),
     );
-    return { ...r, evidence };
+    // The live ledger only carries open orders; a posted receipt still shows the order it received against.
+    const linkedIds = [...new Set(r.lines.flatMap((l) => l.purchaseOrderId ? [l.purchaseOrderId] : []))];
+    const linkedPurchaseOrders = (await Promise.all(linkedIds.map((id) => ctx.db.get("purchaseOrders", id))))
+      .flatMap((po) => po ? [{ _id: po._id, code: po.code, status: po.status, outstanding: po.qty - po.qtyReceived, supplier: po.supplier ?? null }] : []);
+    return { ...r, evidence, linkedPurchaseOrders };
   },
 });
 

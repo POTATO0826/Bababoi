@@ -16,7 +16,7 @@ export const get = query({
 import { comparable, netRecovery, quoteState } from "../src/domain/costs";
 import { missingFields, OPEN_DEAL } from "../src/domain/deal";
 import { inMalaysia } from "../src/domain/places";
-import { applyPick, batchQty, planPick, slotCode } from "../src/domain/stock";
+import { applyPick, batchQty, collectionPayload, planPick, slotCode } from "../src/domain/stock";
 import { DAY } from "../src/domain/types";
 
 async function load(ctx: MutationCtx, dealId: Id<"deals">, expectedVersion?: number) {
@@ -311,7 +311,7 @@ export const confirmCollection = mutation({
     const actor = await getActor(ctx, "owner", "warehouse");
     const deal = await load(ctx, dealId);
     if (!requestId.trim() || requestId.length > 100) fail("A collection request ID is required");
-    const payload = JSON.stringify({ lines: [...lines].sort((a, b) => a.slot.localeCompare(b.slot)), collectedAt, confirmed });
+    const payload = collectionPayload(lines, collectedAt, confirmed);
     const prior = await ctx.db.query("collections").withIndex("by_dealId_and_requestId", q => q.eq("dealId", dealId).eq("requestId", requestId)).unique();
     if (prior) {
       if (prior.payload !== payload) fail("This request ID already recorded a different collection");
@@ -321,7 +321,9 @@ export const confirmCollection = mutation({
     if (deal.status !== "approved" || !deal.reservationId) fail("Not awaiting collection");
     if (!deal.booking || deal.booking.simulated) fail("Record the actual carrier arrangement first");
     if (!confirmed || !lines.length) fail("Confirm the actual quantities that left the warehouse");
-    if (!Number.isFinite(collectedAt) || collectedAt > Date.now() || collectedAt < (deal.decision?.at ?? deal.createdAt)) fail("Collection time must be after approval and no later than now");
+    // Staff enter whole minutes, so a collection in the approval minute is valid.
+    const approvedAt = deal.decision?.at ?? deal.createdAt;
+    if (!Number.isFinite(collectedAt) || collectedAt > Date.now() || collectedAt < approvedAt - (approvedAt % 60_000)) fail("Collection time must be after approval and no later than now");
     const res = (await ctx.db.get("reservations", deal.reservationId)) ?? fail("Reservation missing");
     if (res.status !== "active") fail("Reservation is not active");
     const batch = (await ctx.db.get("batches", res.batchId)) ?? fail("Batch not found");

@@ -137,6 +137,9 @@ describe("purchase-order reconciliation", () => {
     await owner.mutation(api.receiving.post, { actor, receiptId: full.receiptId, expectedVersion: full.version });
     expect(await t.run(async ctx => ctx.db.get("purchaseOrders", first._id))).toMatchObject({ qtyReceived: 5, status: "closed" });
     expect(await t.run(async ctx => ctx.db.get("purchaseOrders", unrelated._id))).toMatchObject({ qtyReceived: 0, status: "open" });
+    // The live ledger lists open orders only; a posted receipt still names the order it closed.
+    const posted = await owner.query(api.receiving.get, { receiptId: full.receiptId });
+    expect(posted?.linkedPurchaseOrders).toEqual([expect.objectContaining({ _id: first._id, status: "closed", outstanding: 0 })]);
   });
 
   it("checks the SKU of every linked line and rolls back the entire receipt", async () => {

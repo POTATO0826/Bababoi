@@ -45,6 +45,8 @@ describe("real business ledger", () => {
     await owner.mutation(api.deals.recordBooking, { actor, dealId, expectedVersion: 2, expectedStateVersion: 5, reference: "BOOK-REAL-1", confirmed: true });
     expect(await owner.mutation(api.deals.confirmCollection, first)).toEqual({ qty: 1, repeated: false });
     expect(await owner.mutation(api.deals.confirmCollection, first)).toEqual({ qty: 1, repeated: true });
+    // Clients serialize line keys in different orders; the same request must still be recognised.
+    expect(await owner.mutation(api.deals.confirmCollection, { ...first, lines: [{ qty: 1, slot: "1A00" }] })).toEqual({ qty: 1, repeated: true });
     await expect(owner.mutation(api.deals.confirmCollection, { ...first, lines: [{ slot: "1A00", qty: 2 }] })).rejects.toThrow("different collection");
     snap = (await owner.query(api.ledger.snapshot, { since: 0 }))!;
     expect(snap.reservations[0]?.qty).toBe(1); expect(snap.deals[0]?.status).toBe("approved");
@@ -55,6 +57,17 @@ describe("real business ledger", () => {
     expect(batch?.locations).toEqual([{ slot: "1A01", qty: 2 }]);
     expect((await t.run(ctx => ctx.db.get("deals", dealId)))?.collectedQty).toBe(2);
     expect((await t.run(ctx => ctx.db.get("deals", dealId)))?.status).toBe("collected");
+  });
+
+  it("accepts a collection entered in the approval minute but not before it", async () => {
+    const f = await fixture(); const { t, owner } = f;
+    const { dealId, quoteId } = await f.prepare(); await f.approve(dealId, quoteId);
+    await owner.mutation(api.deals.recordBooking, { actor, dealId, expectedVersion: 2, expectedStateVersion: 5, reference: "BOOK-MINUTE", confirmed: true });
+    const approvedAt = (await t.run(ctx => ctx.db.get("deals", dealId)))!.decision!.at;
+    const minute = approvedAt - (approvedAt % 60_000);
+    const base = { actor, dealId, expectedVersion: 2, lines: [{ slot: "1A00", qty: 1 }], confirmed: true };
+    await expect(owner.mutation(api.deals.confirmCollection, { ...base, requestId: "too-early", collectedAt: minute - 1 })).rejects.toThrow("after approval");
+    expect(await owner.mutation(api.deals.confirmCollection, { ...base, requestId: "same-minute", collectedAt: minute })).toEqual({ qty: 1, repeated: false });
   });
 
   it("invalidates approval and releases bays when an undelivered order is revised", async () => {

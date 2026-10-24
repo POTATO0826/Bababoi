@@ -23,6 +23,10 @@ const slotOrder = (id: string) => {
 
 export const batchQty = (b: Pick<BatchLike, "locations">) => b.locations.reduce((a, l) => a + l.qty, 0);
 
+/** Canonical form of a collection request, so a retry compares equal whatever key order its client sent. */
+export const collectionPayload = (lines: readonly Loc[], collectedAt: number, confirmed: boolean) =>
+  JSON.stringify({ lines: [...lines].sort((a, b) => a.slot.localeCompare(b.slot)).map(({ qty, slot }) => ({ qty, slot })), collectedAt, confirmed });
+
 /** Bays held by active batches. */
 export function occupiedSlots(batches: readonly BatchLike[]): Map<string, BatchLike> {
   const m = new Map<string, BatchLike>();
