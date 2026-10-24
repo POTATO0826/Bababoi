@@ -12,6 +12,11 @@ await rm(outdir, { recursive: true, force: true });
 
 const entrypoints = [...new Bun.Glob("src/**/*.html").scanSync()];
 
+// Bun inlines only the BUN_PUBLIC_* variables that exist. An unset one would stay `process.env.…` and
+// crash in the browser, so optional switches that are unset are built as empty (off).
+const optionalPublic = ["BUN_PUBLIC_WAREORB_LOCAL_DEMO", "BUN_PUBLIC_WAREORB_PUBLIC_DEMO", "BUN_PUBLIC_CLERK_PUBLISHABLE_KEY"];
+const unsetOptional = Object.fromEntries(optionalPublic.filter((name) => process.env[name] === undefined).map((name) => [`process.env.${name}`, JSON.stringify("")]));
+
 const result = await Bun.build({
   entrypoints,
   outdir,
@@ -23,6 +28,7 @@ const result = await Bun.build({
   env: "BUN_PUBLIC_*",
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),
+    ...unsetOptional,
   },
 });
 

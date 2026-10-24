@@ -170,6 +170,7 @@ export async function runDemo(d: DemoDeps): Promise<RunningDemo> {
       BUN_PUBLIC_WAREORB_LOCAL_DEMO: "1",
       // Bun only inlines public variables that exist; the demo does not use Clerk.
       BUN_PUBLIC_CLERK_PUBLISHABLE_KEY: "",
+      BUN_PUBLIC_WAREORB_PUBLIC_DEMO: "",
       BUN_PUBLIC_CONVEX_URL: target.convexUrl,
       BUN_PUBLIC_CONVEX_SITE_URL: target.siteUrl,
       WAREORB_CONVEX_PORT: String(ports.convex),

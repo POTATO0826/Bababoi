@@ -1,12 +1,15 @@
 // Who is signed in, independent of the sign-in system: Clerk staff accounts in production,
-// or the presenter on this machine in local demo mode (`bun run demo`).
+// the presenter on this machine in local demo mode (`bun run demo`), or the demo owner in the hosted public demo.
 import { useAuth, useClerk, useUser } from "@clerk/react";
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
+import { convexSiteUrl } from "./convex";
 
 export const localDemo = process.env.BUN_PUBLIC_WAREORB_LOCAL_DEMO === "1";
+/** Hosted public demo: a separate deployment with synthetic data; its backend signs every visitor in. */
+export const publicDemo = process.env.BUN_PUBLIC_WAREORB_PUBLIC_DEMO === "1";
 
 export interface Identity {
-  mode: "clerk" | "local-demo";
+  mode: "clerk" | "local-demo" | "public-demo";
   email: string | null;
   signOut: (() => unknown) | null;
   /** Convex token for authenticated HTTP endpoints such as voice. */
@@ -39,11 +42,13 @@ export function ClerkIdentity({ children }: { children: ReactNode }) {
 
 let demoCache: { token: string; expiresAt: number } | null = null;
 
-/** The presenter's token, minted by the local WareOrb server (never by the browser). */
+/** The demo token, minted by the local WareOrb server or the public demo backend (never by the browser). */
 async function demoToken(force = false): Promise<string | null> {
   if (!force && demoCache && demoCache.expiresAt - Date.now() > 60_000) return demoCache.token;
   try {
-    const res = await fetch("/api/demo/token", { cache: "no-store" });
+    const res = publicDemo
+      ? await fetch(`${convexSiteUrl}/demo/token`, { method: "POST", cache: "no-store" })
+      : await fetch("/api/demo/token", { cache: "no-store" });
     if (!res.ok) return null;
     demoCache = (await res.json()) as { token: string; expiresAt: number };
     return demoCache.token;
@@ -52,13 +57,13 @@ async function demoToken(force = false): Promise<string | null> {
   }
 }
 
-/** Convex auth for local demo mode: always signed in as the presenter while the local server runs. */
+/** Convex auth for the demo modes: always signed in as the demo owner while the token source runs. */
 export function useDemoConvexAuth() {
   const fetchAccessToken = useCallback(({ forceRefreshToken }: { forceRefreshToken: boolean }) => demoToken(forceRefreshToken), []);
   return useMemo(() => ({ isLoading: false, isAuthenticated: true, fetchAccessToken }), [fetchAccessToken]);
 }
 
-const DEMO: Identity = { mode: "local-demo", email: null, signOut: null, getToken: () => demoToken() };
+const DEMO: Identity = { mode: publicDemo ? "public-demo" : "local-demo", email: null, signOut: null, getToken: () => demoToken() };
 
 export function DemoIdentity({ children }: { children: ReactNode }) {
   return <IdentityContext.Provider value={DEMO}>{children}</IdentityContext.Provider>;

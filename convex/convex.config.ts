@@ -21,6 +21,9 @@ const app = defineApp({
     WAREORB_LOCAL_DEMO_JWKS: v.optional(v.string()),
     WAREORB_LOCAL_AGENT_URL: v.optional(v.string()),
     WAREORB_LOCAL_AGENT_SECRET: v.optional(v.string()),
+    // Public demo deployment only (src/domain/local-demo.ts lists it; other deployments ignore these).
+    WAREORB_PUBLIC_DEMO_JWKS: v.optional(v.string()),
+    WAREORB_PUBLIC_DEMO_PRIVATE_JWK: v.optional(v.string()),
   },
 });
 app.use(rateLimiter);

@@ -103,6 +103,9 @@ export function App() {
       <AccessScreen title="Local demo is not ready" description="The local WareOrb server could not sign in the presenter. Start everything with `bun run demo` in the project folder, then reload this page." />
     );
   }
+  if (identity.mode === "public-demo" && (!isAuthenticated || !profile)) {
+    return <AccessScreen title="Demo is not available" description="The demo could not sign you in. Reload the page in a minute." />;
+  }
   if (!isAuthenticated) {
     return (
       <AccessScreen title="Your warehouse, in view" description="Sign in with your staff account to open the live warehouse.">

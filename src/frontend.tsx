@@ -6,14 +6,15 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { convex } from "./convex";
-import { ClerkIdentity, DemoIdentity, localDemo, useDemoConvexAuth } from "./identity";
+import { ClerkIdentity, DemoIdentity, localDemo, publicDemo, useDemoConvexAuth } from "./identity";
 import { useWare } from "./store";
 
 const elem = document.getElementById("root")!;
 const clerkKey = process.env.BUN_PUBLIC_CLERK_PUBLISHABLE_KEY;
 const convexUrl = process.env.BUN_PUBLIC_CONVEX_URL;
 /** Local demo pages only ever run on this computer against its own backend. */
-const demoProblem = localDemo
+const demoProblem = localDemo && publicDemo ? "Local demo and public demo modes cannot be combined."
+  : localDemo
   ? !["127.0.0.1", "localhost"].includes(location.hostname) ? `This login-free presentation page must be opened at http://127.0.0.1, not ${location.hostname}.`
     : !convexUrl || !/^http:\/\/127\.0\.0\.1:\d+$/.test(convexUrl) ? "The presentation page is not connected to this computer's local backend. Start it with `bun run demo`."
     : null
@@ -28,7 +29,7 @@ const app = (
           <p className="mt-3 text-sm text-muted-foreground">{demoProblem}</p>
         </section>
       </main>
-    ) : localDemo && convexUrl ? (
+    ) : (localDemo || publicDemo) && convexUrl ? (
       <ConvexProviderWithAuth client={convex} useAuth={useDemoConvexAuth}>
         <DemoIdentity>
           <App />

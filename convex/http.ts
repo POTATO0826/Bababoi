@@ -1,7 +1,11 @@
 // Fish Audio voice endpoints. The browser falls back to its own speech when these return 501 (no key) or fail.
+// Also the public demo's sign-in token (docs/public-demo.md).
 import { httpRouter } from "convex/server";
 import { internal } from "./_generated/api";
 import { env, httpAction } from "./_generated/server";
+import { PUBLIC_DEMO_AUDIENCE, PUBLIC_DEMO_ISSUER, PUBLIC_DEMO_VISITOR } from "../src/domain/local-demo";
+import { mintDemoToken } from "../src/local/demo-identity";
+import { publicDemo } from "./localDemo";
 
 const http = httpRouter();
 
@@ -93,5 +97,18 @@ http.route({
   }),
 });
 http.route({ path: "/voice/asr", method: "OPTIONS", handler: preflight });
+
+/** Public demo sign-in: a short-lived token for the demo owner. Absent on every other deployment. */
+http.route({
+  path: "/demo/token",
+  method: "POST",
+  handler: httpAction(async () => {
+    const demo = publicDemo();
+    if (!demo) return json({ error: "Not found" }, 404);
+    const minted = await mintDemoToken(demo.privateJwk, PUBLIC_DEMO_VISITOR, 3600, { issuer: PUBLIC_DEMO_ISSUER, audience: PUBLIC_DEMO_AUDIENCE });
+    return new Response(JSON.stringify(minted), { status: 200, headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" } });
+  }),
+});
+http.route({ path: "/demo/token", method: "OPTIONS", handler: preflight });
 
 export default http;

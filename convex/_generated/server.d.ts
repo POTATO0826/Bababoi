@@ -44,6 +44,8 @@ type Env = {
   readonly WAREORB_LOCAL_AGENT_SECRET: string | undefined;
   readonly WAREORB_LOCAL_AGENT_URL: string | undefined;
   readonly WAREORB_LOCAL_DEMO_JWKS: string | undefined;
+  readonly WAREORB_PUBLIC_DEMO_JWKS: string | undefined;
+  readonly WAREORB_PUBLIC_DEMO_PRIVATE_JWK: string | undefined;
 };
 
 /**

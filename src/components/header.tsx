@@ -35,6 +35,7 @@ export function Header() {
       </div>
       <div className="ml-auto flex min-w-0 items-center gap-2.5">
         {interimIdentity && <Badge variant="warn" title="Clerk development instance: interim sign-in, not the production launch">Interim sign-in</Badge>}
+        {mode === "public-demo" && <Badge variant="warn" title="Public demo with synthetic data; anyone with the link can change it">Demo · synthetic data</Badge>}
         {mode === "local-demo" && <Badge variant="warn" title="Runs only on this computer with synthetic data; no sign-in">Local demo · synthetic data</Badge>}
         <span className="hidden h-7 items-center gap-[7px] rounded-full border border-border px-2.5 text-xs text-muted-foreground sm:inline-flex">
           <span className={cn("size-[7px] rounded-full", live ? "animate-blink bg-ok" : "bg-warn")} />

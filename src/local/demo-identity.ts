@@ -17,13 +17,18 @@ export async function generateDemoKeys(): Promise<{ privateJwk: string; jwksData
   };
 }
 
-/** A short-lived token the local backend accepts for one demo staff member. */
-export async function mintDemoToken(privateJwk: string, who: { subject: string; name: string; email?: string }, ttlSeconds = 3600): Promise<{ token: string; expiresAt: number }> {
+/** A short-lived token the demo backend accepts for one demo staff member (local demo unless `claims` says otherwise). */
+export async function mintDemoToken(
+  privateJwk: string,
+  who: { subject: string; name: string; email?: string },
+  ttlSeconds = 3600,
+  claims: { issuer: string; audience: string } = { issuer: LOCAL_DEMO_ISSUER, audience: LOCAL_DEMO_AUDIENCE },
+): Promise<{ token: string; expiresAt: number }> {
   const jwk = JSON.parse(privateJwk) as JsonWebKey & { kid?: string };
   const key = await crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: "ES256", typ: "JWT", ...(jwk.kid ? { kid: jwk.kid } : {}) };
-  const payload = { iss: LOCAL_DEMO_ISSUER, aud: LOCAL_DEMO_AUDIENCE, sub: who.subject, name: who.name, ...(who.email ? { email: who.email } : {}), iat: now, nbf: now - 5, exp: now + ttlSeconds };
+  const payload = { iss: claims.issuer, aud: claims.audience, sub: who.subject, name: who.name, ...(who.email ? { email: who.email } : {}), iat: now, nbf: now - 5, exp: now + ttlSeconds };
   const input = `${json64(header)}.${json64(payload)}`;
   const signature = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, new TextEncoder().encode(input)));
   return { token: `${input}.${b64url(signature)}`, expiresAt: (now + ttlSeconds) * 1000 };
