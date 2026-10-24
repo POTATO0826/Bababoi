@@ -1,0 +1,18 @@
+# Render outputs and local tooling stay out of git (the full set lives in the producer's local package, see HANDOFF.md)
+frames/
+drafts/
+qa/*
+!qa/final/
+qa/final/mp4-frames/
+qa/final/sheet-*.png
+previews-v3b/raw/
+audio/*
+!audio/WareOrb-promo-score-master.wav
+!audio/sound-data.json
+source/.venv/
+source/node_modules/
+source/harness/node_modules
+source/harness/dist*/
+source/test3/
+source/draft3/
+**/.sub/

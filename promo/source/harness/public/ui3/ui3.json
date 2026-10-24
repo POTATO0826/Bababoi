@@ -1,0 +1,119 @@
+{
+ "r0-unchecked": {
+  "src": "c01-receipt-review",
+  "box": [
+   14,
+   508,
+   786,
+   948
+  ],
+  "size": [
+   772,
+   440
+  ]
+ },
+ "r1-checked": {
+  "src": "c02-receipt-checked",
+  "box": [
+   14,
+   520,
+   786,
+   960
+  ],
+  "size": [
+   772,
+   440
+  ]
+ },
+ "r2-posted": {
+  "src": "c03-receipt-posted",
+  "box": [
+   14,
+   408,
+   786,
+   848
+  ],
+  "size": [
+   772,
+   440
+  ]
+ },
+ "a0-ageing": {
+  "src": "c05-ageing-batch",
+  "box": null,
+  "size": [
+   800,
+   730
+  ]
+ },
+ "a1-handed": {
+  "src": "c05b-handed",
+  "box": null,
+  "size": [
+   800,
+   588
+  ]
+ },
+ "p0-approval": {
+  "src": "c08-approval",
+  "box": null,
+  "size": [
+   756,
+   606
+  ]
+ },
+ "p1-decision": {
+  "src": "c09-decision",
+  "box": null,
+  "size": [
+   756,
+   444
+  ]
+ },
+ "q0-confirm": {
+  "src": "c10b-collect-confirm",
+  "box": null,
+  "size": [
+   756,
+   216
+  ]
+ },
+ "q1-collected": {
+  "src": "c10c-collected",
+  "box": null,
+  "size": [
+   756,
+   156
+  ]
+ },
+ "buttons": {
+  "r1-checked": [
+   12,
+   356,
+   759,
+   427
+  ],
+  "a0-ageing": [
+   26,
+   634,
+   773,
+   705
+  ],
+  "p0-approval": [
+   12,
+   523,
+   575,
+   594
+  ],
+  "q0-confirm": [
+   12,
+   132,
+   591,
+   203
+  ],
+  "r0-checkbox": [
+   58,
+   177
+  ]
+ }
+}

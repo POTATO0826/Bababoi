@@ -1,0 +1,28 @@
+@font-face { font-family: "Geist"; src: url("./fonts/geist-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "Geist Mono"; src: url("./fonts/geist-mono-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; }
+html, body { margin: 0; padding: 0; background: #09090b; overflow: hidden; }
+#frame { position: relative; width: 1920px; height: 1080px; overflow: hidden; font-family: "Geist", system-ui, sans-serif; color: #fafafa; -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision; }
+#bg { position: absolute; inset: 0; background: radial-gradient(ellipse 75% 80% at 50% 48%, #121217 0%, #0b0b0e 55%, #060608 100%); }
+#frame > canvas { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+#gl { position: absolute; inset: 0; }
+.mono { font-family: "Geist Mono", ui-monospace, monospace; }
+
+.cards { position: absolute; inset: 0; }
+.card { position: absolute; left: 0; top: 0; display: none; overflow: hidden; background: #0c0c0f; box-shadow: 0 24px 60px rgba(0,0,0,0.55); }
+.card img { position: absolute; left: 0; top: 0; width: 100%; height: auto; display: block; }
+.card img:first-child { position: relative; }
+.pin { position: absolute; left: 0; top: 0; display: none; align-items: center; gap: 10px; transform-origin: 0 0; white-space: nowrap; }
+.pin .dot { width: 14px; height: 14px; margin-left: -7px; margin-top: -7px; border-radius: 50%; background: #fafafa; box-shadow: 0 0 0 4px #4F8BEA, 0 0 22px rgba(79,139,234,0.7); }
+.pin .lbl { position: absolute; left: -12px; top: -40px; transform: translateX(-100%); font-size: 17px; font-weight: 500; color: #d4d4d8; padding: 6px 11px; border-radius: 8px; background: rgba(9,9,11,0.8); border: 1px solid #27272a; }
+
+.hud { position: absolute; inset: 0; pointer-events: none; }
+.hud .scrim { position: absolute; left: 0; bottom: 0; width: 1200px; height: 420px; background: radial-gradient(ellipse 60% 75% at 0% 100%, rgba(6,6,8,0.85) 0%, rgba(6,6,8,0.5) 45%, rgba(6,6,8,0) 100%); }
+.cap { position: absolute; left: 80px; bottom: 86px; display: none; text-shadow: 0 2px 22px rgba(0,0,0,0.7); }
+.cap .idea { font-size: 14px; letter-spacing: 0.14em; color: #8db1f3; margin-bottom: 12px; }
+.cap .head { font-size: 64px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; }
+.cap .sub { margin-top: 16px; font-size: 24px; color: #a1a1aa; letter-spacing: -0.005em; }
+.foot { position: absolute; right: 48px; bottom: 40px; font-size: 13.5px; color: #8b8b95; padding: 6px 11px; border-radius: 8px; background: rgba(9,9,11,0.7); border: 1px solid rgba(255,255,255,0.06); }
+.hookword { position: absolute; left: 50%; top: 0; font-size: 78px; font-weight: 600; letter-spacing: -0.02em; opacity: 0; white-space: nowrap; }
+.endword { position: absolute; left: 50%; top: 0; font-size: 112px; font-weight: 600; letter-spacing: -0.035em; line-height: 1; opacity: 0; white-space: nowrap; }
+.endtag { position: absolute; left: 50%; top: 0; font-size: 30px; color: #d4d4d8; letter-spacing: -0.01em; opacity: 0; white-space: nowrap; }
+.endfoot { position: absolute; left: 50%; bottom: 40px; transform: translateX(-50%); font-size: 14px; color: #71717a; opacity: 0; white-space: nowrap; }
