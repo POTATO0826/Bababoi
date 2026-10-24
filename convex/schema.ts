@@ -257,6 +257,8 @@ export default defineSchema({
     reservationId: v.optional(v.id("reservations")),
     collectedAt: v.optional(v.number()),
     collectedQty: v.optional(v.number()),
+    /** Demo data from the seed (fictional buyer; its carrier replies are synthetic and cannot be approved). */
+    synthetic: v.optional(v.boolean()),
     createdBy: actor,
     createdAt: v.number(),
     updatedAt: v.number(),

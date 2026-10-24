@@ -22,7 +22,8 @@ const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 /** "audio/webm;codecs=opus" → "audio/webm". */
 const baseType = (t: string | undefined) => t?.split(";")[0]!.trim().toLowerCase() || undefined;
 const clean = (s: string) => s.trim().replace(/\s+/g, " ");
-const documentKey = (supplier?: string, docRef?: string) => {
+/** Duplicate-delivery key: the same supplier document cannot be posted twice. */
+export const documentKey = (supplier?: string, docRef?: string) => {
   const ref = docRef && clean(docRef).toUpperCase();
   return ref ? `${clean(supplier ?? "").toUpperCase()}\u0000${ref}` : undefined;
 };

@@ -90,6 +90,18 @@ export function rankQuotes<Q extends QuoteLike>(quotes: readonly Q[], deal: Deal
   return { ranked, other };
 }
 
+/**
+ * Why a quote cannot authorise a stock reservation or carrier booking, or null when it can. The same rule the
+ * server applies before submit, approval and booking; the UI uses it to explain a disabled action.
+ */
+export function authorityProblem(q: Pick<QuoteLike, "source" | "verifiedAt" | "reference" | "terms"> & { note?: string; currency?: string }): string | null {
+  if (q.source !== "manual") return "Sandbox and demo quotes cannot authorize real stock operations";
+  if (q.note === "Synthetic") return "This carrier reply is synthetic demo data, so it cannot authorize stock or a booking";
+  if (!q.verifiedAt || !q.reference?.trim() || !q.terms?.trim()) return "Record and verify the carrier's actual reply and terms";
+  if (q.currency !== "MYR") return "Only MYR quotes are supported";
+  return null;
+}
+
 export interface Recovery {
   proceedsSen: number;
   /** Merchant-paid delivery; null when unknown. */

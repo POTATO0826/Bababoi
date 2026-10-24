@@ -107,3 +107,12 @@ describe("Jarvis delivery tools", () => {
     expect(events.at(-1)).toMatchObject({ type: "done" });
   });
 });
+
+describe("seeded synthetic carrier replies", () => {
+  test("Jarvis sees them labelled as synthetic demo data, never as a carrier's real price", () => {
+    const deal = { version: 3, unloading: "requested" as const, priceSen: 84_000, packingSen: 0, freightPayer: "merchant" as const };
+    const q = { _id: "q1", dealVersion: 3, source: "manual", carrier: "Pantai Movers (synthetic)", service: "Van", status: "ok", requestedAt: NOW, expiresAt: NOW + 3_600_000, currency: "MYR", totalSen: 28_000, unloading: "included", note: "Synthetic" } as QuoteRecord;
+    expect(quoteView(q, deal, NOW).source).toMatch(/^Synthetic carrier reply/);
+    expect(quoteView({ ...q, note: undefined }, deal, NOW).source).toBe("Carrier reply");
+  });
+});

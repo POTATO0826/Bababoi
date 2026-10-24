@@ -64,7 +64,7 @@ export function quoteView(q: QuoteRecord, deal: Pick<Deal, "version" | "unloadin
   const state = quoteState(q, deal, now);
   const c = q.status === "ok" ? comparable(q, deal) : null;
   return {
-    source: SOURCE_LABEL[q.source], carrier: q.carrier, vehicle: q.service, state,
+    source: q.note === "Synthetic" ? "Synthetic carrier reply (demo data, not a real price; cannot be approved)" : SOURCE_LABEL[q.source], carrier: q.carrier, vehicle: q.service, state,
     totalRM: q.totalSen != null ? q.totalSen / 100 : null, currency: q.currency ?? null,
     breakdown: breakdownLines(q.breakdownRaw).map((b) => ({ item: b.name, rm: b.sen / 100 })),
     requestedAt: iso(q.requestedAt), expiresAt: iso(q.expiresAt), noExpiryReturned: q.status === "ok" && q.expiresAt == null,

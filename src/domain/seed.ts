@@ -1,6 +1,7 @@
 // Deterministic synthetic ledger for the demo. Every row is labelled synthetic; dates are relative to `now`.
 import { seedRows, type CategoryId, type FloorId, type ZoneId } from "../data/catalog";
 import { SLOTS } from "../data/layout";
+import { addScenarios, type SeedAudit, type SeedCollection, type SeedDeal, type SeedQuote, type SeedReceipt } from "./seed-scenarios";
 import { packagesFor, priceFor } from "./specs";
 import { DAY, type Actor, type AgeingRule, type Loc, type MovementReason, type ReplenishRule, type SkuLike } from "./types";
 
@@ -81,6 +82,33 @@ export interface SeedBatch {
   receivedAt: number;
   qtyReceived: number;
   locations: Loc[];
+  /** The posted receipt that created this batch, when the seed includes one. */
+  receiptCode?: string;
+}
+
+export interface SeedReservation {
+  skuCode: string;
+  batchCode: string;
+  qty: number;
+  label: string;
+  /** Bays held for an approved sale (planPick). Older bookings carry no bay pick. */
+  pick?: Loc[];
+  status?: "active" | "consumed" | "released";
+  dealCode?: string;
+  createdAt?: number;
+}
+
+export interface SeedPurchaseOrder {
+  code: string;
+  skuCode: string;
+  qty: number;
+  createdAt: number;
+  unitCostSen: number;
+  supplier: string;
+  orderRef: string;
+  confirmedAt: number;
+  qtyReceived?: number;
+  status?: "open" | "closed";
 }
 
 export interface SeedMovement {
@@ -98,16 +126,17 @@ export interface SeedMovement {
 export interface SeedData {
   skus: (SkuLike & { synthetic: true })[];
   batches: SeedBatch[];
-  reservations: { skuCode: string; batchCode: string; qty: number; label: string }[];
-  purchaseOrders: { code: string; skuCode: string; qty: number; createdAt: number; unitCostSen: number; supplier: string; orderRef: string; confirmedAt: number }[];
+  reservations: SeedReservation[];
+  purchaseOrders: SeedPurchaseOrder[];
   movements: SeedMovement[];
-  receipts: {
-    code: string;
-    supplier: string;
-    docRef: string;
-    note: string;
-    lines: { rawText: string; skuCode: string; qty: number; confidence: number }[];
-  }[];
+  receipts: SeedReceipt[];
+  deals: SeedDeal[];
+  quotes: SeedQuote[];
+  collections: SeedCollection[];
+  /** History rows for the seeded receipts, sales and catalogue items. */
+  audit: SeedAudit[];
+  /** Last deal number used, so the app's next sale gets the following code. */
+  lastDealNo: number;
   settings: {
     ageing: AgeingRule;
     replenish: ReplenishRule;
@@ -153,7 +182,7 @@ export function buildSeed(now: number): SeedData {
   const cursor = new Map<string, number>();
   const usedCodes = new Set<string>();
   const batches: SeedBatch[] = [];
-  const reservations: SeedData["reservations"] = [];
+  const reservations: SeedReservation[] = [];
   const purchaseOrders: SeedData["purchaseOrders"] = [];
   const movements: SeedMovement[] = [];
   let bookingNo = 1100;
@@ -236,21 +265,36 @@ export function buildSeed(now: number): SeedData {
   });
   movements.sort((a, b) => b.at - a.at);
 
+  // The scripted §8 receipt: a handwritten note waiting for the warehouse to count and post.
+  const noteAt = now - 2 * 3_600_000;
+  const dn2291: SeedReceipt = {
+    code: "DN-2291",
+    status: "needs_review",
+    supplier: "Luma Furniture (synthetic)",
+    docRef: "DN-2291",
+    evidence: [{ kind: "note", text: "Handwritten delivery note · 4 dining chairs, oak", at: noteAt }],
+    // The synthetic note does not state condition: the presenter confirms it on arrival.
+    lines: [{ key: "l0", rawText: "Dining chair oak × 4", skuCode: "CHAIR-LUMA-0410", candidates: ["CHAIR-LUMA-0410"], qty: 4, condition: "", confidence: 0.92, questions: [], verified: false, source: "seed" }],
+    extraction: { status: "done", at: noteAt },
+    createdBy: SEED_ACTOR,
+    createdAt: noteAt,
+  };
+
+  // Receipts, sales, quotes and history for every screen (no random numbers: the data above is unchanged).
+  const scenarios = addScenarios(now, { skus, batches, reservations, purchaseOrders, movements });
+
   return {
     skus,
     batches,
     reservations,
     purchaseOrders,
     movements,
-    receipts: [
-      {
-        code: "DN-2291",
-        supplier: "Luma Furniture (synthetic)",
-        docRef: "DN-2291",
-        note: "Handwritten delivery note · 4 dining chairs, oak",
-        lines: [{ rawText: "Dining chair oak × 4", skuCode: "CHAIR-LUMA-0410", qty: 4, confidence: 0.92 }],
-      },
-    ],
+    receipts: [dn2291, ...scenarios.receipts],
+    deals: scenarios.deals,
+    quotes: scenarios.quotes,
+    collections: scenarios.collections,
+    audit: scenarios.audit,
+    lastDealNo: scenarios.lastDealNo,
     settings: {
       ageing: { minAgeDays: 90, windowDays: 30, maxSales: 0 },
       replenish: { windowDays: 30, coverageDays: 21, budgetSen: 2_000_000 },

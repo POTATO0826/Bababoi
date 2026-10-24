@@ -191,6 +191,82 @@ If a check fails, move the offending `.env*` file aside or use a separate checko
   in priority order (least cover first), so they fit together. Items without cost or with too
   little history are listed with the reason, not a number. Purchases are recorded by a person.
 
+## Demo data
+
+### Loading it
+
+The first `bun run demo` loads the dataset only when the local database is empty. Later starts keep
+whatever is there. Nothing is reset automatically.
+
+```sh
+bun run demo:reset                        # replace the data, then start the demo
+bun scripts/demo.ts --reset --setup-only  # replace the data and exit (no web server)
+```
+
+A reset **deletes every receipt, sale, quote, purchase order, movement and history row** in the local
+database, including anything entered during a rehearsal, and loads the dataset again. The presenter
+login and staff records are kept. Stop a running demo (Ctrl+C) before resetting. A reset makes no
+network, AI, Lalamove, booking or payment requests and schedules no background jobs.
+
+Times are relative to the moment of loading. Open quotes stay valid for about four days and
+collection dates are four to seven days ahead; reset again after that. The green "Freed" bay from
+the collected sale shows for 24 hours.
+
+### What is in it
+
+| Area | Records |
+| --- | --- |
+| Inventory | 44 items on two floors: healthy stock, low stock (Table Lamp, 2 left), 5 ageing batches, at least 2 free bays in every zone |
+| Receiving | **To verify:** DN-2291 (handwritten note, no measurements) and BT-5531 (linked to PO-3045, an unknown "teak bench" and an unreadable quantity, partly missing measurements). **Posted:** DN-2130 (measured wardrobe packages), DN-2287 (3 of 6 tables on PO-3050), OL-INV-2207 (a new item). **Rejected:** KL-7781 (damaged at the dock) |
+| Sales | D-1001 finding a buyer · D-1002 ready for quotes · D-1003 needs details · D-1004 waiting for approval · D-1005 approved, bays reserved · D-1006 collected today · D-1007 rejected with a reason · D-1008 closed |
+| Delivery | Buyers, phone numbers, confirmed coordinates, access, future collection times and confirmed cargo from all three sources (measured at receiving, catalogue, entered by staff) |
+| Quotes | On D-1002: current, unloading unknown (incomplete), expired, and a failed sandbox example. One quote each on D-1004 to D-1007 |
+| Purchasing | 11 open orders, including PO-3050 with 3 of 6 received |
+| Replenishment | Suggestions from 90 days of sales, plus the Table Lamp marked "not enough data" (no unit cost) and ageing items with no recent sales |
+| History | Every seeded sale and receipt has History rows explaining how it got there |
+
+### Walkthrough
+
+- **Owner:** Ageing lists the 5 ageing batches; B-2140-A (the 120-day sofa) is free to hand to sales.
+  Approvals shows D-1004: Approve is disabled because its carrier reply is synthetic; Reject works.
+  Replenish shows the plan, PO-3050 part received and the lamp without a cost.
+- **Sales:** Delivery lists D-1002, D-1004 and D-1007 as ready for quotes, and D-1001 and D-1003
+  with what they still need. D-1007 shows the owner's rejection reason.
+- **Warehouse:** Receive has BT-5531 to resolve (create or match the bench, count the side tables,
+  confirm condition, assign bays) and posted and rejected examples. Collection shows D-1005 with its
+  reserved bay. The map shows the bay freed by D-1006.
+- **The full flow, live:** open **D-1002** → Add quote → record the carrier's actual reply →
+  Send for approval → Approve (the bay is reserved) → Record carrier reference → Collection. Stock,
+  movements and History update. This is the one seeded sale that can complete, because only a quote
+  you verify can authorize stock.
+
+### What is synthetic
+
+Every seeded item, batch, movement, receipt and sale is stored with `synthetic: true`. Receipts and
+sales show a **Synthetic** badge, and the header says "Local demo · synthetic data". Buyers,
+suppliers, carriers and staff names end in "(synthetic)". Phone numbers are placeholders
+(`+60 3-0000 …`).
+
+- **Carrier replies** are marked "Synthetic", like the **Demo** button's replies. They have no
+  reference, terms or verification, so the app never ranks, submits, approves or books with them.
+  They are not Lalamove prices.
+- **The failed sandbox quote** is a labelled example. No request was sent and it has no price.
+  Real sandbox quotes appear only after you connect Lalamove and press **Get sandbox quotes**.
+- **Demo history fixtures:** D-1004 to D-1007 show a submission, an approval, a collection and a
+  rejection that no verified carrier reply authorized. D-1005 (approved) says so in its Collection section and can
+  only be revised or closed. D-1006 (collected) carries a **Simulated booking** (SIM-D-1006). Its
+  collection is recorded consistently: the batch lost those units, a dispatch movement was added,
+  and its hold was consumed.
+
+### Limitations
+
+- Sales history covers about 200 days for the whole warehouse, so the "too little history" case only
+  appears on a fresh ledger outside demo mode. The no-cost and no-recent-sales cases are seeded.
+- The base sales history (orders O-5xxx) predates the current batches: it drives sales rates but is
+  not subtracted from batch bays. Sales added by the scenarios (D-1006, the lamp) are.
+- The Inventory list's "Low stock" label uses the page's own threshold (`?lowStockThreshold=`,
+  default 4). The seeded business setting, used by Jarvis, is 2.
+
 ## Troubleshooting
 
 | Message | Fix |
@@ -217,6 +293,12 @@ If a check fails, move the offending `.env*` file aside or use a separate checko
 bun run check            # unit + Convex tests, both typechecks, production build
 bun run test:browser     # Chromium harness: Jarvis, measurements, Lalamove card (needs Playwright)
 ```
+
+The demo dataset is tested in an in-memory database (`convex/seed.test.ts`): unique codes and valid
+references, bays and holds, the pinned anchors, every sale stage, quote and receipt example, no
+network calls or scheduled jobs, the app refusing synthetic quotes, the D-1002 flow completing, and
+a repeated reset giving the same dataset. `src/domain/seed-scenarios.test.ts` checks the pure
+builder.
 
 Agent tests use Pi's scripted **faux provider** and say so ("mocked provider"). They prove the
 wiring, not a live model. The browser test starts disconnected and drives the real Jarvis UI:

@@ -15,7 +15,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { errorText, run } from "@/convex";
-import { comparable, netRecovery, quoteState, rankQuotes } from "@/domain/costs";
+import { authorityProblem, comparable, netRecovery, quoteState, rankQuotes } from "@/domain/costs";
 import { missingFields } from "@/domain/deal";
 import { fmtRM, sen } from "@/domain/money";
 import { BUYER_PLACES, mapsLink, WAREHOUSE } from "@/domain/places";
@@ -61,13 +61,14 @@ export function DealDetail({ id }: { id: string }) {
             v{deal.version}
           </Badge>
           {deal.booking && <Badge variant={deal.booking.simulated ? "warn" : "ok"}>{deal.booking.simulated ? "Simulated booking" : "Carrier confirmed"}</Badge>}
+          {deal.synthetic && <Badge variant="tag" title="Seeded demo sale with a fictional buyer">Synthetic</Badge>}
         </>
       }
     >
       <BuyerSection key={deal._id} deal={deal} />
       <DeliverySections deal={deal} quotes={quotes} />
       {(deal.status === "pending_approval" || deal.decision) && <DecisionSection deal={deal} quotes={quotes} />}
-      {(deal.status === "approved" || deal.status === "collected") && <CollectSection key={deal._id} deal={deal} />}
+      {(deal.status === "approved" || deal.status === "collected") && <CollectSection key={deal._id} deal={deal} quotes={quotes} />}
       <History entity={`deal:${deal._id}`} />
       <CloseDeal deal={deal} />
     </DetailShell>
@@ -660,6 +661,7 @@ function DecisionSection({ deal, quotes }: { deal: DealDoc; quotes: QuoteDoc[] }
   const cost = q && q.status === "ok" ? comparable(q, deal) : null;
   const rec = cost ? netRecovery(deal, cost) : null;
   const pending = deal.status === "pending_approval";
+  const blocked = q ? authorityProblem(q) : null;
   const batch = useWare((s) => s.ledger?.batches.find((b) => b._id === deal.batchId));
   const frees = useMemo(() => {
     if (!batch || !pending) return [];
@@ -713,11 +715,12 @@ function DecisionSection({ deal, quotes }: { deal: DealDoc; quotes: QuoteDoc[] }
               Refresh quote
             </Button>
           ) : null}
+          {blocked && <span className="text-[12px] text-warn">{blocked}. Sales can record the carrier&rsquo;s verified reply for this version; you can still reject.</span>}
           <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason (needed to reject)" className="min-h-14 text-[13px]" />
           <div className="flex gap-2">
             <Button
               className="flex-1"
-              disabled={busy || st !== "current" || rec?.netSen == null}
+              disabled={busy || st !== "current" || rec?.netSen == null || !!blocked}
               onClick={async () => {
                 setBusy(true);
                 await run(
@@ -766,7 +769,7 @@ function pendingCollection(key: string): CollectionAttempt | null {
   return null;
 }
 
-function CollectSection({ deal }: { deal: DealDoc }) {
+function CollectSection({ deal, quotes }: { deal: DealDoc; quotes: QuoteDoc[] }) {
   const role = useWare((s) => s.role);
   const res = useWare((s) => s.ledger?.reservations.find((r) => r._id === deal.reservationId));
   const confirm = useMutation(api.deals.confirmCollection);
@@ -783,6 +786,9 @@ function CollectSection({ deal }: { deal: DealDoc }) {
   const stale = baseVersion !== deal.version;
   const allowed = role === "warehouse" || role === "owner";
   const booked = deal.booking && !deal.booking.simulated;
+  const approvedQuote = quotes.find((q) => q._id === deal.decision?.quoteId);
+  /** Demo history approved with a synthetic reply: no real carrier can be recorded, so nothing can leave. */
+  const blocked = approvedQuote ? authorityProblem(approvedQuote) : null;
   const actual = pick.map((p) => ({ slot: p.slot, qty: Number(counts[p.slot] ?? "0") })).filter((p) => p.qty > 0);
   const qty = actual.reduce((sum, p) => sum + p.qty, 0);
   const valid = actual.length > 0 && pick.every((p) => { const n = Number(counts[p.slot] ?? "0"); return Number.isSafeInteger(n) && n >= 0 && n <= p.qty; }) && Number.isFinite(new Date(when).getTime());
@@ -816,10 +822,10 @@ function CollectSection({ deal }: { deal: DealDoc }) {
 
   return <Section label="Collection" aside={deal.booking && <Badge variant={booked ? "ok" : "warn"}>{deal.booking.ref}</Badge>}>
     {deal.status === "approved" && <>
-      <CarrierArrangement deal={deal} />
+      {blocked && !booked ? <span className="text-[12px] text-warn">Demo history: {blocked.charAt(0).toLowerCase() + blocked.slice(1)}. No carrier can be recorded and nothing can be collected. Revise the sale to quote it for real.</span> : <CarrierArrangement deal={deal} />}
       {(deal.collectedQty ?? 0) > 0 && <span className="text-[12px] text-muted-foreground">{deal.collectedQty} units already collected · {pick.reduce((sum, p) => sum + p.qty, 0)} remain reserved</span>}
       <div className="flex flex-wrap gap-1.5">{pick.map((p) => <Badge key={p.slot} variant="reserved" className="font-mono">{slotCode(p.slot)} ×{p.qty} reserved</Badge>)}</div>
-      {allowed && !booked && <span className="text-[12px] text-warn">Record the actual carrier arrangement before confirming goods left the warehouse.</span>}
+      {allowed && !booked && !blocked && <span className="text-[12px] text-warn">Record the actual carrier arrangement before confirming goods left the warehouse.</span>}
       {allowed && booked && !pending && <>
         {stale && dirty && <div role="alert" className="text-[12px] text-warn">This allocation changed. Your count is still shown. Reload the remaining allocation before entering a new collection.<Button size="xs" variant="outline" onClick={reload}>Reload allocation</Button></div>}
         <span className="text-[12px] text-muted-foreground">Enter only the units that actually left each bay. Leave the rest at zero.</span>
@@ -888,6 +894,14 @@ function ReviseDeal({ deal }: { deal: DealDoc }) {
 
 // ── History / close ──────────────────────────────────────────────────────
 
+/** Time for today's rows, the date for older ones, so seeded and real history reads in order. */
+const stamp = (at: number) => {
+  const d = new Date(at);
+  return d.toDateString() === new Date().toDateString()
+    ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })
+    : d.toLocaleDateString([], { day: "numeric", month: "short" });
+};
+
 export function History({ entity }: { entity: string }) {
   const rows = useQuery(api.ledger.history, { entity }) ?? [];
   if (!rows.length) return null;
@@ -896,7 +910,7 @@ export function History({ entity }: { entity: string }) {
       <div className="flex flex-col">
         {rows.slice(0, 6).map((h) => (
           <div key={h._id} className="grid grid-cols-[64px_minmax(0,1fr)] gap-2 border-t border-border-inner py-1.5 text-[12px]">
-            <span className="font-mono text-[11px] text-faint">{new Date(h.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</span>
+            <span className="font-mono text-[11px] text-faint" title={new Date(h.at).toLocaleString()}>{stamp(h.at)}</span>
             <span className="truncate text-text-2">
               {h.actor.name} · {h.summary}
               {h.reason ? ` · ${h.reason}` : ""}

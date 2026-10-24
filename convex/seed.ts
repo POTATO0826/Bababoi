@@ -3,6 +3,7 @@ import { env, internalMutation, mutation, type MutationCtx } from "./_generated/
 import { actor } from "./schema";
 import { audit, fail } from "./lib";
 import { getActor } from "./access";
+import { documentKey } from "./receiving";
 import { buildSeed } from "../src/domain/seed";
 
 const TABLES: TableNames[] = [
@@ -15,6 +16,7 @@ const TABLES: TableNames[] = [
   "receipts",
   "deals",
   "quotes",
+  "collections",
   "settings",
   "kv",
 ];
@@ -25,63 +27,107 @@ async function wipe(ctx: MutationCtx) {
   }
 }
 
+/** Insert the synthetic ledger from `buildSeed`. Records refer to each other by code until they have IDs. */
 async function load(ctx: MutationCtx) {
   const now = Date.now();
   const s = buildSeed(now);
+  const seedActor = { role: "owner" as const, name: "Seed" };
+  const need = <T,>(map: Map<string, T>, code: string, what: string): T => map.get(code) ?? fail(`Seed data is inconsistent: no ${what} ${code}`);
+
   for (const sku of s.skus) await ctx.db.insert("skus", sku);
-  const batchIds = new Map<string, Id<"batches">>();
-  for (const b of s.batches) {
-    batchIds.set(b.code, await ctx.db.insert("batches", { ...b, status: "active", synthetic: true }));
+
+  const poIds = new Map<string, Id<"purchaseOrders">>();
+  for (const { qtyReceived = 0, status = "open", ...p } of s.purchaseOrders) {
+    poIds.set(p.code, await ctx.db.insert("purchaseOrders", { ...p, qtyReceived, status, createdBy: seedActor }));
   }
-  for (const r of s.reservations) {
-    await ctx.db.insert("reservations", {
-      skuCode: r.skuCode,
-      batchId: batchIds.get(r.batchCode)!,
-      qty: r.qty,
-      pick: [],
-      status: "active",
-      label: r.label,
-      createdAt: now - 3 * 86_400_000,
-    });
-  }
-  for (const p of s.purchaseOrders) {
-    await ctx.db.insert("purchaseOrders", {
-      ...p,
-      qtyReceived: 0,
-      status: "open",
-      createdBy: { role: "owner", name: "Seed" },
-    });
-  }
-  for (const m of s.movements) {
-    const { batchCode, ...rest } = m;
-    await ctx.db.insert("movements", { ...rest, ...(batchCode ? { batchId: batchIds.get(batchCode) } : {}), synthetic: true });
-  }
-  for (const r of s.receipts) {
-    await ctx.db.insert("receipts", {
-      code: r.code,
-      status: "needs_review",
-      supplier: r.supplier,
-      docRef: r.docRef,
-      evidence: [{ kind: "note", text: r.note, at: now - 2 * 3_600_000 }],
-      lines: r.lines.map((l, i) => ({
-        key: `l${i}`,
-        rawText: l.rawText,
-        skuCode: l.skuCode,
-        candidates: [l.skuCode],
-        qty: l.qty,
-        // The synthetic note does not state condition: the presenter confirms it on arrival.
-        condition: "",
-        confidence: l.confidence,
-        questions: [],
-        verified: false,
-        source: "seed" as const,
-      })),
-      extraction: { status: "done", at: now - 2 * 3_600_000 },
-      createdBy: { role: "warehouse", name: "Seed" },
-      createdAt: now - 2 * 3_600_000,
+
+  const receiptIds = new Map<string, Id<"receipts">>();
+  for (const { lines, ...r } of s.receipts) {
+    receiptIds.set(r.code, await ctx.db.insert("receipts", {
+      ...r,
+      ...(r.status === "posted" ? { docKey: documentKey(r.supplier, r.docRef) } : {}),
+      lines: lines.map(({ poCode, ...l }) => ({ ...l, ...(poCode ? { purchaseOrderId: need(poIds, poCode, "purchase order") } : {}) })),
       synthetic: true,
+    }));
+  }
+
+  const batchIds = new Map<string, Id<"batches">>();
+  for (const { receiptCode, ...b } of s.batches) {
+    batchIds.set(b.code, await ctx.db.insert("batches", {
+      ...b,
+      status: b.locations.length ? "active" : "depleted",
+      ...(receiptCode ? { receiptId: need(receiptIds, receiptCode, "receipt") } : {}),
+      synthetic: true,
+    }));
+  }
+
+  const dealIds = new Map<string, Id<"deals">>();
+  for (const { batchCode, cargo, proposal: _p, decision: _d, ...d } of s.deals) {
+    dealIds.set(d.code, await ctx.db.insert("deals", {
+      ...d,
+      batchId: need(batchIds, batchCode, "batch"),
+      ...(cargo ? {
+        cargo: {
+          packages: cargo.packages, source: cargo.source, confirmedBy: cargo.confirmedBy, confirmedAt: cargo.confirmedAt,
+          ...(cargo.receiptCode ? { receiptId: need(receiptIds, cargo.receiptCode, "receipt"), lineKey: cargo.lineKey } : {}),
+        },
+      } : {}),
+      synthetic: true,
+    }));
+  }
+
+  const quoteIds = new Map<string, Id<"quotes">>();
+  for (const { key, dealCode, ...q } of s.quotes) {
+    const dealId = need(dealIds, dealCode, "deal");
+    quoteIds.set(key, await ctx.db.insert("quotes", { ...q, dealId, dedupeKey: `${dealId}:${q.dealVersion}:seed:${key}` }));
+  }
+
+  const holdIds = new Map<string, Id<"reservations">>();
+  for (const r of s.reservations) {
+    const id = await ctx.db.insert("reservations", {
+      skuCode: r.skuCode,
+      batchId: need(batchIds, r.batchCode, "batch"),
+      qty: r.qty,
+      pick: r.pick ?? [],
+      status: r.status ?? "active",
+      label: r.label,
+      createdAt: r.createdAt ?? now - 3 * 86_400_000,
+      ...(r.dealCode ? { dealId: need(dealIds, r.dealCode, "deal") } : {}),
+    });
+    if (r.dealCode) holdIds.set(r.dealCode, id);
+  }
+
+  // Proposals, decisions and holds point at quotes and reservations created above.
+  for (const d of s.deals) {
+    const { proposal, decision } = d;
+    if (!proposal && !decision && !holdIds.has(d.code)) continue;
+    await ctx.db.patch("deals", need(dealIds, d.code, "deal"), {
+      ...(proposal ? { proposal: { version: proposal.version, quoteId: need(quoteIds, proposal.quoteKey, "quote"), submittedBy: proposal.submittedBy, submittedAt: proposal.submittedAt } } : {}),
+      ...(decision ? {
+        decision: {
+          approved: decision.approved, by: decision.by, at: decision.at,
+          ...(decision.quoteKey ? { quoteId: need(quoteIds, decision.quoteKey, "quote") } : {}),
+          ...(decision.netSen !== undefined ? { netSen: decision.netSen } : {}),
+          ...(decision.deliverySen !== undefined ? { deliverySen: decision.deliverySen } : {}),
+          ...(decision.reason ? { reason: decision.reason } : {}),
+        },
+      } : {}),
+      ...(holdIds.has(d.code) ? { reservationId: holdIds.get(d.code)! } : {}),
     });
   }
+
+  for (const { batchCode, ...m } of s.movements) {
+    await ctx.db.insert("movements", { ...m, ...(batchCode ? { batchId: need(batchIds, batchCode, "batch") } : {}), synthetic: true });
+  }
+  for (const { dealCode, ...c } of s.collections) await ctx.db.insert("collections", { ...c, dealId: need(dealIds, dealCode, "deal") });
+
+  for (const a of s.audit) {
+    const id = a.entity.kind === "deal" ? need(dealIds, a.entity.code, "deal") : a.entity.kind === "receipt" ? need(receiptIds, a.entity.code, "receipt") : a.entity.code;
+    await ctx.db.insert("audit", { at: a.at, actor: a.actor, action: a.action, entity: `${a.entity.kind}:${id}`, summary: a.summary, ...(a.reason ? { reason: a.reason } : {}) });
+  }
+
+  // The app's next sale continues the seeded D-#### codes.
+  await ctx.db.insert("kv", { key: "seq:D", value: String(s.lastDealNo), updatedAt: now });
   await ctx.db.insert("settings", { key: "main", ...s.settings, seededAt: now });
 }
 

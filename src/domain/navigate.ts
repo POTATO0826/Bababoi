@@ -62,14 +62,14 @@ export function words(text: string): string[] {
     .map((w) => (w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w));
 }
 
-/** Map words, never product words here ("floor 2" is a place, not a Floor Lamp). */
-const PLACE_WORDS = new Set(["floor", "zone", "bay", "level"]);
+/** Places on the map, never product words: "floor 2" is a place, but "floor lamp" is a Floor Lamp. */
+const PLACES = /\b(?:floor|level|f)\s*[12]\b|\bzone\s*[a-d]\b|\bbays?\b/gi;
 
 const skuWords = (s: Pick<SkuLike, "code" | "model" | "variant">) => new Set(words(`${s.code} ${s.model} ${s.variant}`));
 
 /** Catalogue items the text names, best match first (ties all kept). Empty when nothing matches. */
 export function matchSkus<T extends Pick<SkuLike, "code" | "model" | "variant">>(skus: readonly T[], text: string): T[] {
-  const q = new Set(words(text).filter((w) => !PLACE_WORDS.has(w)));
+  const q = new Set(words(text.replace(PLACES, " ")));
   const code = text.toUpperCase().match(/\b[A-Z]{3,6}-[A-Z]{3,6}-\d{4}\b/)?.[0];
   const exact = code ? skus.find((s) => s.code === code) : undefined;
   if (exact) return [exact];
