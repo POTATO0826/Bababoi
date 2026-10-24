@@ -108,12 +108,35 @@ export async function streamAgentChat(
   return terminal!;
 }
 
+const unreachable: AgentStatus = { ready: false, connection: "none", reason: "The local agent service is not reachable. Is the demo still running?" };
+
 export async function fetchAgentStatus(fetchImpl: typeof fetch = fetch): Promise<AgentStatus> {
   try {
     const res = await fetchImpl("/api/agent/status", { cache: "no-store" });
-    if (!res.ok) return { ready: false, reason: `The agent service answered ${res.status}` };
+    if (!res.ok) return { ready: false, connection: "none", reason: `The agent service answered ${res.status}` };
     return (await res.json()) as AgentStatus;
   } catch {
-    return { ready: false, reason: "The local agent service is not reachable. Is `bun run demo` still running?" };
+    return unreachable;
   }
 }
+
+export type AuthOutcome = { ok: true; status: AgentStatus } | { ok: false; error: string; status?: AgentStatus };
+
+async function postAuth(path: string, body: unknown, fetchImpl: typeof fetch, signal?: AbortSignal): Promise<AuthOutcome> {
+  try {
+    const res = await fetchImpl(path, { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
+    const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: unknown; status?: AgentStatus } | null;
+    if (res.ok && data?.ok && data.status) return { ok: true, status: data.status };
+    return { ok: false, error: typeof data?.error === "string" ? data.error : `The agent service answered ${res.status}`, ...(data?.status ? { status: data.status } : {}) };
+  } catch {
+    if (signal?.aborted) return { ok: false, error: "Cancelled" };
+    return { ok: false, error: unreachable.reason!, status: unreachable };
+  }
+}
+
+/** Send a Claude API key from the masked login form to this computer's server (same origin, POST body only). */
+export const loginAgent = (apiKey: string, opts: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {}) =>
+  postAuth("/api/agent/login", { provider: "anthropic", apiKey }, opts.fetchImpl ?? fetch, opts.signal);
+
+/** Disconnect this app's agent on the server. */
+export const logoutAgent = (opts: { fetchImpl?: typeof fetch } = {}) => postAuth("/api/agent/logout", {}, opts.fetchImpl ?? fetch);

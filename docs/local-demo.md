@@ -31,22 +31,44 @@ is `.convex/demo-backend.log`.
 - The **first run downloads** the local Convex backend binary from github.com.
 - **Chrome** for live voice transcripts (see Voice below).
 
-## One-time operator setup for the agent (outside the app)
+## Connecting the agent from the web page (/login)
 
-Credentials never go into the browser, the repository or `.env.local`.
+The warehouse opens without any account. Only the AI assistant needs a provider:
 
-```sh
-cd ~ && pi        # Pi 1.4 CLI (Homebrew: pi-coding-agent)
-/login            # choose OpenAI (ChatGPT Plus/Pro) or Anthropic (API key)
-/quit
-```
+1. In Jarvis, click **Log in** (next to "Agent not connected"), or type `/login` and press Enter.
+2. Paste the **Claude API key** into the masked field and press **Log in**. The server checks the key
+   with Anthropic (a model-metadata request, 15-second limit) before using it.
+3. Jarvis shows **Connected · Claude** with the model (`anthropic/claude-sonnet-5-5` by default).
+   Chat and receipt photo reading use it immediately; no restart.
+4. **Log out** (status bar) or `/logout` disconnects at once. Answers and photo readings still running
+   are stopped, and their conversations are retired. Later requests cannot use the old key, and no
+   preconfigured provider is used until you log in again.
 
-Credentials are stored by Pi in `~/.pi/agent/auth.json`. The demo picks the first logged-in of
-`openai-codex/gpt-6.1-sol` and `anthropic/claude-sonnet-5-5`; override with
-`WAREORB_AGENT_MODEL=provider/model`. Alternatively export `ANTHROPIC_API_KEY` in the shell that runs
-`bun run demo` (it is passed only to the local server process). Without any login, the app still
-works for manual receiving and Jarvis shows **"Agent not connected"** with these steps — never a
-scripted answer.
+Credential lifetime and handling:
+
+- The key is kept **only in the WareOrb server's memory** for this run, in an app-scoped Pi runtime.
+  A page refresh keeps the connection. Stopping or restarting `bun run demo` forgets it.
+- It is never written to disk, `.env.local`, Pi's shared `~/.pi/agent/auth.json`, the browser
+  (no storage, URL or bundle), the chat transcript, tool calls, logs, Convex data or API responses.
+  Provider errors are redacted.
+- The field is a password input; its value is cleared on success, cancel and close.
+- `/login sk-…` typed into the chat opens the masked form, and the typed text is neither recorded nor
+  sent. A key pasted into the chat by mistake is refused the same way.
+- A wrong or revoked key, an unavailable model, a timeout or a network failure shows a clear error.
+  An existing connection stays as it was. Logging in with a different key replaces the connection
+  and starts fresh agent sessions. A logout during a pending login wins.
+- The login and logout routes accept only a same-origin JSON POST from this exact page
+  (`http://127.0.0.1:<port>` or `http://localhost:<port>`, matching the Host). They are size-limited
+  and `no-store`, and do not exist outside local demo mode.
+
+Developer fallback (optional, no web step): before any web login or logout, a provider already
+configured on this computer is used. That means Pi's own login (`pi` → `/login`, stored in
+`~/.pi/agent/auth.json`) or `ANTHROPIC_API_KEY` exported in the shell that runs `bun run demo`. The
+order is `openai-codex/gpt-6.1-sol`, then `anthropic/claude-sonnet-5-5`; override with
+`WAREORB_AGENT_MODEL`. A web login always takes precedence, and an explicit web logout disables the
+fallback until the next web login. Logging out in the app never changes Pi's shared credentials.
+Without any connection, manual warehouse work still works, and Jarvis shows **Agent not connected**
+with a Log in button, never a scripted answer.
 
 ## Optional settings (shell environment)
 
@@ -110,8 +132,11 @@ If a check fails, move the offending `.env*` file aside or use a separate checko
 | `Port 3210 (local Convex) is already in use` | Stop the other program or `WAREORB_CONVEX_PORT=3220 bun run demo` |
 | `The local Convex backend needs Node.js 20, 22, 24` | Install Node 24 or set `WAREORB_CONVEX_NODE` |
 | `convex dev failed … github.com` | First run needs internet to download the backend |
-| Jarvis: "Agent not connected" | Do the one-time `pi` → `/login` step; **Check again** (no restart needed) |
-| Jarvis: "The provider rejected the credentials" | Log in again with `pi` → `/login` |
+| Jarvis: "Agent not connected" | Click **Log in** (or `/login`) and enter a Claude API key |
+| Login: "Claude rejected this API key" | The key is wrong or revoked; create a new key in the Anthropic console |
+| Login: "Checking the key timed out" / "Could not reach api.anthropic.com" | Check the internet connection, then try again |
+| Jarvis: "The provider rejected the credentials" | The key was revoked meanwhile: **Log out**, then **Log in** with a valid key |
+| Connected before, disconnected after restarting the demo | Expected: web-entered keys live only in server memory; log in again |
 | Voice note says "No transcript" | Use Chrome, allow the microphone, check the internet; the recording is kept anyway |
 
 ## Tests
@@ -122,20 +147,26 @@ bun run test:browser     # Chromium harness: Jarvis streaming + measurements (ne
 ```
 
 Agent tests use Pi's scripted **faux provider** and say so ("mocked provider"). They prove the
-wiring, not a live model. `WAREORB_E2E_LIVE=1 bun run test:browser` repeats the browser check
-against your real provider login, using synthetic data only.
+wiring, not a live model. The browser test starts disconnected and drives the real Jarvis UI:
+`/login` by Enter and by mouse, the masked form, a wrong key, cancel, connect, a streamed tool answer,
+the `/login <key>` and pasted-key guards, `/logout`, a refused question after logout, `/replenish`,
+reconnect, refresh, and the complete app bundle booting in demo mode. It uses a mocked key check and
+the mocked provider. `WAREORB_E2E_LIVE=1 WAREORB_E2E_CLAUDE_KEY=… bun run test:browser` repeats it with
+a real key typed into the form and checked by Anthropic (synthetic data only; the key stays in that
+shell's environment).
 
 ## Presentation-Mac smoke test (live checks)
 
-Run these in order on the presentation Mac after the one-time `pi` → `/login`:
+Run these in order on the presentation Mac. No terminal login is needed; the key is entered in the page.
 
 1. `bun install --frozen-lockfile && bun run check` — all green.
-2. `bun run demo:reset`. Expect `Loaded/Reloaded the synthetic demo data` and
-   `Agent: Pi · <provider>/<model>`.
-3. `curl -s http://127.0.0.1:3000/api/agent/status` shows `"ready":true`.
-   `curl -s -H 'Origin: https://evil.example' http://127.0.0.1:3000/api/demo/token` is refused (403).
-4. Open http://127.0.0.1:3000 in Chrome. Check there is no login screen and the header shows
-   "Local demo · synthetic data".
+2. `bun run demo:reset`. Expect `Loaded/Reloaded the synthetic demo data` and an `Agent …` line.
+3. `curl -s -H 'Origin: https://evil.example' http://127.0.0.1:3000/api/demo/token` is refused (403).
+4. Open http://127.0.0.1:3000 in Chrome. Check there is no app login screen and the header shows
+   "Local demo · synthetic data". Jarvis shows **Agent not connected** with **Log in**, and `/`
+   suggests `/login` (unless a developer fallback provider is configured).
+4a. **Log in** → enter a wrong key: a clear error, still disconnected. Then enter your Claude API key:
+   **Connected · Claude** with `anthropic/claude-sonnet-5-5`, no restart.
 5. Jarvis: ask "What should we reorder and how much?". Expect an `analyze_reorder` tool card with a
    result, then a streamed answer whose quantities and totals match the Replenish panel. Press
    **Stop** during a second question; it shows "Stopped".
@@ -148,8 +179,10 @@ Run these in order on the presentation Mac after the one-time `pi` → `/login`:
    assign bays, tick checked, then **Post counted stock** twice. Stock rises once.
 9. Ctrl+C, then `bun run demo` again (no `--reset`). Expect "Kept the existing local warehouse data",
    with the posted receipt and stock still there.
-10. `pi` → `/logout` (or set a wrong `WAREORB_AGENT_MODEL`), then ask Jarvis. Expect
-    "Agent not connected" with the setup steps. Log in again afterwards.
+10. Refresh the page: still connected. Run `/logout`: **Agent not connected**. A question is now
+    refused (no old key, no fallback); manual receiving and Replenish still work. Log in again through
+    the form and ask once more. Stop and restart the demo: disconnected again (the key is never restored
+    from disk or the browser), unless a developer fallback provider is configured.
 
 ## Verification evidence (Claude Cloud, 24 October 2026)
 
@@ -232,3 +265,52 @@ photo extraction, and microphone recording/transcription. Pi was not logged in, 
 were read or copied. Cloud's live Anthropic evidence above is separate from these remaining checks.
 Duplicate-post idempotency remains covered by automated backend tests, not a repeated live HTTP post
 in this walkthrough.
+
+## Web agent login/logout (Claude Cloud, 24 October 2026)
+
+`/login`, the masked Claude API key form, **Connected · Claude** status, and `/logout` / **Log out**
+are implemented in Jarvis (`docs/claude-cloud-web-agent-login.md`). The warehouse itself remains accountless.
+
+Automated (mocked key check and labelled mocked providers; no real credential):
+
+- `bun run check` passes: **172 Bun tests and 61 Convex tests**, both typechecks and the production
+  build. The starting point was 158 + 61.
+- `src/local/web-login.test.ts` covers:
+  - Valid login, taking precedence over a preconfigured provider; refresh stays connected.
+  - Wrong, malformed, erroring and timed-out keys, with redaction (the key never appears in results).
+  - An invalid or cancelled replacement keeps the current connection; a new key gives fresh sessions.
+  - Logout disables chat and photo reading without falling back to a preconfigured provider.
+  - Logout stops an answer or photo reading in progress.
+  - A logout during a pending login wins; concurrent logins never restore an older one.
+  - Pi's shared `auth.json` is byte-for-byte unchanged, and no files are written.
+- `src/local/routes.test.ts` checks the login and logout routes over real loopback HTTP:
+  - They refuse a foreign origin, the wrong protocol, the wrong port, a lookalike host, an origin
+    that doesn't match the Host, a missing Origin, the wrong content type, an oversized body and a
+    non-Claude provider.
+  - Responses are `no-store` and never contain the key. After logout, chat is refused.
+- `src/local/config.test.ts` covers both server modes. The real server in hosted mode returns 404
+  for the agent and auth routes. In demo mode it serves them with origin and format checks.
+- `bun run test:browser` passes all 32 checks: the full Jarvis login, logout and command flow
+  described under Tests, plus the measurement checks. The complete app bundle boots in demo mode.
+
+Live (a Claude API key the user authorised earlier in this conversation, set only in each command's
+environment; synthetic data only):
+
+- `WAREORB_E2E_LIVE=1 bun run test:browser` passes all 32 checks:
+  - A wrong key typed into the real form was rejected by Anthropic and shown as "Claude rejected this
+    API key".
+  - The real key connected as **Connected · Claude** (`anthropic/claude-sonnet-5-5`).
+  - A real `analyze_reorder` tool call and a streamed answer were rendered.
+  - Logout refused the next question, and reconnect plus refresh stayed connected.
+- Receipt photo reading via the web login read 3 lines from the synthetic note. After logout the same
+  reading was refused with "The agent is logged out".
+- Real demo web server (`src/index.ts`, demo mode): after a login over HTTP, status showed
+  `connection: "web"`. After stopping and starting the server, status was `connection: "none"`.
+
+Pending on the presentation Mac:
+
+- The complete app against a real local Convex backend: Cloud's proxy blocks the backend binary
+  download, so the browser test uses the component harness plus a full-app boot check.
+- Logging in with the user's own key in Chrome, and receipt reading of a real handwritten photo
+  after a web login.
+- Run steps 4–10 of the smoke test above.

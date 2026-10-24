@@ -1,7 +1,7 @@
 // Composite actions shared by the inventory list, the 3D scene and the Jarvis voice agent.
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
-import { closePanel, commandById, openCommand, type CommandId } from "@/commands";
+import { agentCommandOf, closePanel, commandById, looksLikeSecret, openCommand, type CommandId } from "@/commands";
 import { convex } from "@/convex";
 import {
   CATEGORY_INFO,
@@ -16,7 +16,7 @@ import {
 } from "@/data/catalog";
 import { SLOT_BY_ID } from "@/data/layout";
 import { localDemo } from "@/identity";
-import { fetchAgentStatus, streamAgentChat } from "@/local/agent-client";
+import { fetchAgentStatus, loginAgent, logoutAgent, streamAgentChat } from "@/local/agent-client";
 import { actorNow, getInventory, getWare, setWare, type AgentTurn, type TranscriptLine, type ViewMode } from "@/store";
 import { scanToReceipt } from "@/scan";
 import { recordUtterance, say, stopSpeaking, transcribe } from "@/voice/voice";
@@ -299,6 +299,24 @@ export async function runCommand(text: string) {
   stopListening();
   stopSpeaking();
   setWare({ agentOpen: true, interim: "" });
+  // Credentials never enter the transcript or reach a model: /login opens the masked form instead.
+  const auth = localDemo ? agentCommandOf(t) : null;
+  if (auth === "login") {
+    pushLine("user", "/login");
+    openAgentLogin();
+    if (t.trim().length > "/login".length) speak("For safety, the text after /login was not saved or sent. Enter the key in the masked form.");
+    return;
+  }
+  if (auth === "logout") {
+    pushLine("user", "/logout");
+    await logoutLocalAgent();
+    return;
+  }
+  if (looksLikeSecret(t)) {
+    if (localDemo) openAgentLogin();
+    speak(localDemo ? "That looked like an API key, so it was not saved or sent. Use the masked Log in form." : "That looked like an API key, so it was not saved or sent.");
+    return;
+  }
   stopLocalAgent();
   pushLine("user", t);
   if (t.startsWith("/")) {
@@ -340,10 +358,61 @@ export async function runCommand(text: string) {
 let agentSessionId = crypto.randomUUID();
 let agentRun: { abort: AbortController; done: Promise<void> } | null = null;
 
-/** Ask the local agent service what is configured (no provider call). */
+/** Bumped by every login and logout: status, login and stream responses from before it are ignored. */
+let authEpoch = 0;
+
+/** Ask the local agent service what is connected (no provider call). */
 export async function refreshLocalAgent() {
+  const my = authEpoch;
   const st = await fetchAgentStatus();
+  if (my !== authEpoch) return;
   setWare({ localAgent: { ...st, checkedAt: Date.now() } });
+}
+
+/** Open the masked Claude API key form. */
+export function openAgentLogin() {
+  setWare({ agentOpen: true, agentLoginOpen: true, panelOpen: false });
+}
+
+export function closeAgentLogin() {
+  setWare({ agentLoginOpen: false });
+}
+
+/**
+ * Submit a key from the masked form. The key is only passed through to the local server; it is never put
+ * in the store, the transcript or browser storage. On success, open answers are stopped and a new
+ * conversation starts with the new connection.
+ */
+export async function loginLocalAgent(apiKey: string, signal?: AbortSignal): Promise<{ ok: true } | { ok: false; error: string }> {
+  const my = ++authEpoch;
+  const r = await loginAgent(apiKey, { signal });
+  if (my !== authEpoch) return { ok: false, error: "This login was replaced by a newer login or a logout." };
+  if (!r.ok) {
+    if (r.status) setWare({ localAgent: { ...r.status, checkedAt: Date.now() } });
+    return { ok: false, error: r.error };
+  }
+  stopLocalAgent();
+  agentSessionId = crypto.randomUUID();
+  setWare({ localAgent: { ...r.status, checkedAt: Date.now() }, agentLoginOpen: false });
+  pushLine("ai", `Connected · ${r.status.provider === "anthropic" ? "Claude" : r.status.provider} (${r.status.provider}/${r.status.model}). Ask me about stock, movements or reordering.`);
+  return { ok: true };
+}
+
+/** Disconnect the agent for this app: stops open answers; later requests cannot use the old key. */
+export async function logoutLocalAgent() {
+  const my = ++authEpoch;
+  stopLocalAgent();
+  agentSessionId = crypto.randomUUID();
+  setWare({ localAgent: { ready: false, connection: "none", loggedOut: true, reason: "Logging out…", checkedAt: Date.now() }, orb: "idle" });
+  const r = await logoutAgent();
+  if (my !== authEpoch) return;
+  if (r.ok) {
+    setWare({ localAgent: { ...r.status, checkedAt: Date.now() } });
+    pushLine("ai", "Logged out. The agent is disconnected; manual warehouse work continues. Use Log in to connect again.");
+  } else {
+    if (r.status) setWare({ localAgent: { ...r.status, checkedAt: Date.now() } });
+    pushLine("ai", `Logout did not complete: ${r.error}`);
+  }
 }
 
 /** Stop the answer in progress, if any (Stop button, a new question, closing Jarvis). */
@@ -375,6 +444,7 @@ async function askLocalAgent(text: string, my: number) {
     await Promise.race([previous.done, new Promise((r) => setTimeout(r, 3000))]);
   }
   const id = ++lineId;
+  const myAuth = authEpoch;
   setWare((s) => ({ transcript: [...s.transcript, { id, who: "ai" as const, text: "", agent: { state: "streaming" as const, tools: [] } }].slice(-40) }));
   const abort = new AbortController();
   let finish = () => {};
@@ -383,6 +453,8 @@ async function askLocalAgent(text: string, my: number) {
   let finalText = "";
   try {
     const outcome = await streamAgentChat({ sessionId: agentSessionId, text, signal: abort.signal }, (e) => {
+      // A login or logout happened since this question: late events must not change the screen.
+      if (myAuth !== authEpoch && e.type !== "cancelled") return;
       switch (e.type) {
         case "status":
           updateLine(id, (l) => withTurn(l, () => ({ model: e.model, subscription: e.subscription })));
@@ -413,7 +485,7 @@ async function askLocalAgent(text: string, my: number) {
           break;
       }
     });
-    if (my !== session) return;
+    if (my !== session || myAuth !== authEpoch) return;
     if (outcome === "done") voiceReply(finalText || (getWare().transcript.find((l) => l.id === id)?.text ?? ""));
     else {
       setWare({ orb: voiceOn() ? "listening" : "idle" });

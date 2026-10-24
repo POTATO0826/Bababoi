@@ -3,7 +3,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import { LOCAL_DEMO_AUDIENCE, LOCAL_DEMO_ISSUER, LOCAL_DEMO_PRESENTER } from "../domain/local-demo";
-import { readDeliveryEvidence, runAnalystTurn, setModelResolverForTests, agentStatus, type AgentEvent } from "./agent";
+import { readDeliveryEvidence, runAnalystTurn, setModelResolverForTests, setWebLoginForTests, agentStatus, webLogin, webLogout, type AgentEvent } from "./agent";
 import { streamAgentChat } from "./agent-client";
 import { generateDemoKeys } from "./demo-identity";
 import { localDemoRoutes, type AgentOps } from "./routes";
@@ -42,7 +42,7 @@ beforeAll(async () => {
 afterAll(() => convex.stop(true));
 afterEach(() => setModelResolverForTests(null));
 
-const realOps: AgentOps = { agentStatus, runAnalystTurn, readDeliveryEvidence };
+const realOps: AgentOps = { agentStatus, runAnalystTurn, readDeliveryEvidence, login: webLogin, logout: webLogout };
 
 function serve(ops: AgentOps = realOps) {
   const port = 40_000 + Math.floor(Math.random() * 10_000);
@@ -85,7 +85,7 @@ describe("presenter identity and agent routes", () => {
     setModelResolverForTests(async () => ({ error: "No agent provider is configured. (mocked)" }));
     const { server, base } = serve();
     try {
-      expect(await (await fetch(`${base}/api/agent/status`)).json()).toEqual({ ready: false, reason: "No agent provider is configured. (mocked)" });
+      expect(await (await fetch(`${base}/api/agent/status`)).json()).toEqual({ ready: false, connection: "none", reason: "No agent provider is configured. (mocked)" });
     } finally { server.stop(true); }
   });
 
@@ -157,6 +157,71 @@ describe("extraction bridge (Convex action → local agent service)", () => {
       const bad = await post(base, `Bearer ${SECRET}`, { catalogue: [], evidence: [{ kind: "note", text: "??" }] });
       expect(bad.status).toBe(422);
       expect(await bad.json()).toEqual({ error: "The model returned no structured draft. Enter the counted lines by hand." });
+    } finally { server.stop(true); }
+  });
+});
+
+describe("web login routes (mocked key check and provider)", () => {
+  const KEY = "sk-ant-api03-MOCK-ROUTE-KEY-for-tests-only-0001";
+  async function mockLogin() {
+    const { resolved } = await mockedPi();
+    setModelResolverForTests(async () => ({ error: "No agent provider is configured. (mocked)" }));
+    setWebLoginForTests({ runtime: async () => resolved, verify: async (key) => (key === KEY ? { ok: true } : { ok: false, error: `rejected ${key}` }) });
+  }
+  const post = (base: string, path: string, body: string, headers: Record<string, string> = {}) =>
+    fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Origin: base, ...headers }, body });
+
+  test("only this exact page (protocol, host, port), with JSON, small bodies, may log in or out", async () => {
+    await mockLogin();
+    const { server, base } = serve();
+    const port = new URL(base).port;
+    try {
+      const body = JSON.stringify({ provider: "anthropic", apiKey: KEY });
+      const refused: [Record<string, string>, number][] = [
+        [{ Origin: "https://evil.example" }, 403],
+        [{ Origin: `https://127.0.0.1:${port}` }, 403],
+        [{ Origin: `http://127.0.0.1:${Number(port) + 1}` }, 403],
+        [{ Origin: `http://127.0.0.1.evil.example:${port}` }, 403],
+        [{ Origin: `http://localhost:${port}` }, 403], // origin must match the Host it was sent to
+        [{ Host: "evil.example" }, 403],
+        [{ "Content-Type": "text/plain" }, 403],
+      ];
+      for (const [headers, status] of refused) {
+        for (const path of ["/api/agent/login", "/api/agent/logout"]) expect((await post(base, path, body, headers)).status).toBe(status);
+      }
+      const noOrigin = await fetch(`${base}/api/agent/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+      expect(noOrigin.status).toBe(403);
+      expect((await post(base, "/api/agent/login", JSON.stringify({ apiKey: KEY, pad: "x".repeat(5000) }))).status).toBe(413);
+      expect((await post(base, "/api/agent/login", JSON.stringify({ provider: "openai", apiKey: KEY }))).status).toBe(400);
+      expect((await post(base, "/api/agent/login", "not json")).status).toBe(400);
+      expect(await agentStatus()).toMatchObject({ ready: false });
+    } finally { server.stop(true); }
+  });
+
+  test("login, refresh and logout over HTTP; responses never contain the key and are not cached", async () => {
+    await mockLogin();
+    const { server, base } = serve();
+    try {
+      const bad = await post(base, "/api/agent/login", JSON.stringify({ provider: "anthropic", apiKey: "sk-ant-api03-MOCK-WRONG-KEY-for-tests-0000" }));
+      expect(bad.status).toBe(422);
+      expect(bad.headers.get("cache-control")).toBe("no-store");
+      const badText = await bad.text();
+      expect(badText).not.toContain("MOCK-WRONG-KEY");
+      expect(JSON.parse(badText)).toMatchObject({ ok: false, status: { ready: false } });
+
+      const ok = await post(base, "/api/agent/login", JSON.stringify({ provider: "anthropic", apiKey: KEY }));
+      expect(ok.status).toBe(200);
+      const okText = await ok.text();
+      expect(okText).not.toContain(KEY);
+      expect(JSON.parse(okText)).toMatchObject({ ok: true, status: { ready: true, connection: "web", provider: "mocked-provider" } });
+      expect(await (await fetch(`${base}/api/agent/status`)).json()).toMatchObject({ ready: true, connection: "web" });
+
+      const out = await post(base, "/api/agent/logout", "{}");
+      expect(await out.json()).toMatchObject({ ok: true, status: { ready: false, loggedOut: true } });
+      expect(await (await fetch(`${base}/api/agent/status`)).json()).toMatchObject({ ready: false, loggedOut: true });
+      const events: AgentEvent[] = [];
+      await streamAgentChat({ sessionId: "after-logout-session", text: "stock?", fetchImpl: (((i: string, init?: RequestInit) => fetch(`${base}${i}`, { ...init, headers: { ...(init?.headers as Record<string, string>), Origin: base } })) as typeof fetch) }, (e) => events.push(e));
+      expect(events).toEqual([{ type: "error", message: expect.stringContaining("logged out"), setup: true }]);
     } finally { server.stop(true); }
   });
 });

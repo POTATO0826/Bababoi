@@ -1,10 +1,14 @@
-// The local warehouse agent: Pi (https://pi.dev) with the operator's own provider login.
-// Credentials stay in ~/.pi/agent/auth.json (written by `pi` → /login) or the server environment; nothing
-// reaches the browser. Sessions get only the tools passed in: no shell, files, extensions or skills.
+// The local warehouse agent: Pi (https://pi.dev). It connects in one of two ways:
+// - web login (Jarvis → /login): a Claude API key held only in this server's memory, in an app-scoped
+//   in-memory Pi runtime. It never touches Pi's shared ~/.pi/agent/auth.json and is gone when the server stops;
+// - before any web choice, a preconfigured provider (Pi's own login or the server environment).
+// After a web logout no fallback is used. Nothing secret reaches the browser. Sessions get only the tools
+// passed in: no shell, files, extensions or skills.
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Type, type ImageContent } from "@earendil-works/pi-ai";
+import Anthropic from "@anthropic-ai/sdk";
+import { InMemoryCredentialStore, Type, type ImageContent } from "@earendil-works/pi-ai";
 import {
   createAgentSession,
   createExtensionRuntime,
@@ -26,7 +30,8 @@ const PREFERRED = [
   { provider: "anthropic", id: "claude-sonnet-5-5" },
 ] as const;
 
-export const SETUP_HINT = "One-time operator setup in a terminal: run `pi`, then `/login` and choose OpenAI (ChatGPT Plus/Pro) or Anthropic (API key). Then restart `bun run demo`.";
+/** Shown to the presenter: the web Log in action, not terminal steps (those live in docs/local-demo.md). */
+export const SETUP_HINT = "Use Log in in Jarvis (or type /login) to connect a Claude API key.";
 
 type Model = NonNullable<ReturnType<ModelRuntime["getModel"]>>;
 type Resolved = { runtime: ModelRuntime; model: Model } | { error: string };
@@ -63,20 +68,153 @@ async function resolveConfiguredModel(): Promise<Resolved> {
 
 let resolver: () => Promise<Resolved> = resolveConfiguredModel;
 
-/** The model the agent uses now. */
-export const resolveModel = () => resolver();
+// ── App-scoped connection (web /login and /logout) ───────────────────────
+
+type Connection =
+  /** No explicit web choice yet: a preconfigured provider (Pi login / environment) may be used. */
+  | { mode: "preconfigured" }
+  | { mode: "web"; runtime: ModelRuntime; model: Model }
+  /** Explicit web logout: no fallback until the next web login. */
+  | { mode: "logged-out" };
+let connection: Connection = { mode: "preconfigured" };
+/** Bumped by every login attempt and logout; a slower, older attempt can then never apply. */
+let authVersion = 0;
+/** Bumped whenever the credential in use changes; work started under an older epoch is stopped. */
+let credentialEpoch = 0;
+const extractions = new Set<AgentSession>();
+
+export const LOGGED_OUT = "The agent is logged out. Use Log in in Jarvis (or type /login) to connect a Claude API key.";
+const DEFAULT_WEB_MODEL = "claude-sonnet-5-5";
+const VERIFY_TIMEOUT_MS = 15_000;
+
+export type KeyCheck = { ok: true } | { ok: false; error: string };
+/** Checks a key against the provider; injectable so tests never need a real credential. */
+export type KeyVerifier = (apiKey: string, model: Model, signal: AbortSignal) => Promise<KeyCheck>;
+/** Builds the app-scoped runtime for a key; injectable so tests can use a labelled mocked provider. */
+export type WebRuntimeFactory = (apiKey: string) => Promise<{ runtime: ModelRuntime; model: Model } | { error: string }>;
+
+/** Never let a submitted key appear in a message, even if a provider echoes it. */
+export function redact(text: string, apiKey?: string): string {
+  let out = text;
+  if (apiKey && apiKey.length >= 4) out = out.split(apiKey).join("[redacted]");
+  return out.replace(/sk-ant-[A-Za-z0-9_-]{6,}/g, "sk-ant-[redacted]");
+}
+
+/** The smallest authenticated call: read the model's metadata (no tokens are generated). */
+export const verifyAnthropicKey: KeyVerifier = async (apiKey, model, signal) => {
+  const client = new Anthropic({ apiKey, baseURL: "https://api.anthropic.com", maxRetries: 0, timeout: VERIFY_TIMEOUT_MS });
+  try {
+    await client.models.retrieve(model.id, {}, { signal });
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof Anthropic.AuthenticationError) return { ok: false, error: "Claude rejected this API key (invalid or revoked). Check the key and try again." };
+    if (e instanceof Anthropic.PermissionDeniedError) return { ok: false, error: `This key is not allowed to use ${model.name ?? model.id}.` };
+    if (e instanceof Anthropic.NotFoundError) return { ok: false, error: `The model ${model.id} is not available to this key.` };
+    if (e instanceof Anthropic.RateLimitError) return { ok: false, error: "Claude is rate-limiting this key right now. Wait a moment and try again." };
+    if (e instanceof Anthropic.APIConnectionTimeoutError || signal.aborted) return { ok: false, error: "Checking the key timed out. Check the internet connection and try again." };
+    if (e instanceof Anthropic.APIConnectionError) return { ok: false, error: "Could not reach api.anthropic.com. Check the internet connection and try again." };
+    if (e instanceof Anthropic.APIError) return { ok: false, error: `Claude answered with an error (${e.status ?? "unknown"}). Try again.` };
+    return { ok: false, error: "The key could not be checked. Try again." };
+  }
+};
+
+const webModelId = () => {
+  const explicit = process.env.WAREORB_AGENT_MODEL?.trim();
+  return explicit?.startsWith("anthropic/") ? explicit.slice("anthropic/".length) : DEFAULT_WEB_MODEL;
+};
+
+/** An in-memory Pi runtime holding only this key: nothing is read from or written to Pi's auth file. */
+export const createWebRuntime: WebRuntimeFactory = async (apiKey) => {
+  const rt = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, refreshOnCreate: false });
+  const model = rt.getModel("anthropic", webModelId());
+  if (!model) return { error: `The model anthropic/${webModelId()} is not known to this Pi version.` };
+  await rt.setRuntimeApiKey("anthropic", apiKey);
+  return { runtime: rt, model };
+};
+
+let verifier: KeyVerifier = verifyAnthropicKey;
+let webRuntime: WebRuntimeFactory = createWebRuntime;
+
+/** Stop and forget every session that may hold the previous credential. */
+function retireSessions() {
+  credentialEpoch++;
+  for (const [id, c] of chats) {
+    c.retired = true;
+    if (c.session) { void c.session.abort().catch(() => {}); if (!c.busy) c.session.dispose(); }
+    chats.delete(id);
+  }
+  for (const session of extractions) void session.abort().catch(() => {});
+  extractions.clear();
+}
+
+export type LoginResult = { ok: true; status: AgentStatus } | { ok: false; error: string; status: AgentStatus };
 
 /**
- * Tests only: run the agent against a scripted provider instead of the operator's login.
- * Passing null restores the real resolver. Never called by the demo server.
+ * Web login with a Claude API key. Verified against the provider before use; on success it replaces any
+ * previous connection and retires old sessions. A failed, cancelled or superseded attempt changes nothing.
+ */
+export async function webLogin(rawKey: unknown, signal?: AbortSignal): Promise<LoginResult> {
+  const fail = async (error: string): Promise<LoginResult> => ({ ok: false, error, status: await agentStatus() });
+  const apiKey = typeof rawKey === "string" ? rawKey.trim() : "";
+  if (!apiKey) return fail("Enter a Claude API key.");
+  if (apiKey.length < 20 || apiKey.length > 512 || !/^[\x21-\x7e]+$/.test(apiKey)) return fail("That does not look like a Claude API key (it usually starts with sk-ant-).");
+  const version = ++authVersion;
+  try {
+    const made = await webRuntime(apiKey);
+    if ("error" in made) return fail(made.error);
+    if (signal?.aborted) return fail("Login cancelled.");
+    const timeout = AbortSignal.timeout(VERIFY_TIMEOUT_MS + 1_000);
+    const check = await verifier(apiKey, made.model, signal ? AbortSignal.any([signal, timeout]) : timeout);
+    if (version !== authVersion) return fail("This login was replaced by a newer login or a logout.");
+    if (!check.ok) return fail(redact(check.error, apiKey));
+    retireSessions();
+    connection = { mode: "web", runtime: made.runtime, model: made.model };
+    return { ok: true, status: await agentStatus() };
+  } catch (e) {
+    return fail(redact(e instanceof Error ? `The key could not be checked: ${e.message}` : "The key could not be checked.", apiKey));
+  }
+}
+
+/** Disconnect this app's agent. Shared Pi credentials and the environment are not touched. */
+export async function webLogout(): Promise<AgentStatus> {
+  authVersion++;
+  if (connection.mode === "web") void connection.runtime.removeRuntimeApiKey("anthropic").catch(() => {});
+  connection = { mode: "logged-out" };
+  retireSessions();
+  return await agentStatus();
+}
+
+/** The model the agent uses now. */
+export async function resolveModel(): Promise<Resolved> {
+  if (connection.mode === "web") return { runtime: connection.runtime, model: connection.model };
+  if (connection.mode === "logged-out") return { error: LOGGED_OUT };
+  return await resolver();
+}
+
+/**
+ * Tests only: run the agent against a scripted provider instead of the operator's login, and reset the
+ * web connection. Passing null restores the real resolver. Never called by the demo server.
  */
 export function setModelResolverForTests(fn: (() => Promise<Resolved>) | null) {
   resolver = fn ?? resolveConfiguredModel;
-  for (const [id, c] of chats) { c.session?.dispose(); chats.delete(id); }
+  connection = { mode: "preconfigured" };
+  verifier = verifyAnthropicKey;
+  webRuntime = createWebRuntime;
+  retireSessions();
+}
+
+/** Tests only: replace the key check and the runtime factory with labelled mocks. */
+export function setWebLoginForTests(opts: { verify?: KeyVerifier; runtime?: WebRuntimeFactory }) {
+  if (opts.verify) verifier = opts.verify;
+  if (opts.runtime) webRuntime = opts.runtime;
 }
 
 export interface AgentStatus {
   ready: boolean;
+  /** web = connected from Jarvis /login; preconfigured = Pi login or environment; none = not connected. */
+  connection: "web" | "preconfigured" | "none";
+  /** True after an explicit web logout (no fallback is used until the next web login). */
+  loggedOut?: boolean;
   provider?: string;
   model?: string;
   modelName?: string;
@@ -88,9 +226,9 @@ export interface AgentStatus {
 /** What is configured, without calling the provider or exposing credentials. */
 export async function agentStatus(): Promise<AgentStatus> {
   const r = await resolveModel();
-  if ("error" in r) return { ready: false, reason: r.error };
+  if ("error" in r) return { ready: false, connection: "none", reason: r.error, ...(connection.mode === "logged-out" ? { loggedOut: true } : {}) };
   return {
-    ready: true, provider: r.model.provider, model: r.model.id, modelName: r.model.name,
+    ready: true, connection: connection.mode === "web" ? "web" : "preconfigured", provider: r.model.provider, model: r.model.id, modelName: r.model.name,
     subscription: r.runtime.isUsingSubscription(r.model.provider), readsPhotos: r.model.input.includes("image"),
   };
 }
@@ -164,7 +302,7 @@ export type AgentEvent =
   | { type: "cancelled" }
   | { type: "error"; message: string; setup?: boolean };
 
-interface Chat { session: AgentSession | null; model: string; provider: string; modelName?: string; subscription?: boolean; at: number; busy: boolean }
+interface Chat { session: AgentSession | null; model: string; provider: string; modelName?: string; subscription?: boolean; at: number; busy: boolean; retired?: boolean }
 const chats = new Map<string, Chat>();
 const CHAT_IDLE_MS = 30 * 60_000;
 const MAX_CHATS = 20;
@@ -188,11 +326,17 @@ export async function runAnalystTurn(sessionId: string, text: string, tools: () 
   chat.at = Date.now();
   let unsubscribe = () => {};
   const onAbort = () => { void chat!.session?.abort(); };
+  const epoch = credentialEpoch;
+  /** The connection changed (logout or another login) while this turn ran: it must not continue. */
+  const stale = () => chat!.retired || epoch !== credentialEpoch;
+  const disconnected = { type: "error" as const, message: "The agent connection changed (log out or new login), so this answer was stopped.", setup: true };
   try {
     if (!chat.session) {
       const r = await resolveModel();
       if ("error" in r) { chats.delete(sessionId); return emit({ type: "error", message: r.error, setup: true }); }
+      if (stale()) { chats.delete(sessionId); return emit(disconnected); }
       chat.session = await newSession(r, ANALYST_PROMPT, tools());
+      if (stale()) { chat.session.dispose(); chats.delete(sessionId); return emit(disconnected); }
       chat.provider = r.model.provider;
       chat.model = `${r.model.provider}/${r.model.id}`;
       chat.modelName = r.model.name;
@@ -203,22 +347,26 @@ export async function runAnalystTurn(sessionId: string, text: string, tools: () 
     emit({ type: "status", model: chat.model, provider: chat.provider, modelName: chat.modelName, subscription: chat.subscription });
     const session = chat.session;
     unsubscribe = session.subscribe((event) => {
+      if (stale()) return;
       if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") emit({ type: "text", delta: event.assistantMessageEvent.delta });
       else if (event.type === "tool_execution_start") emit({ type: "tool_start", id: event.toolCallId, name: event.toolName, args: boundedResult(event.args) });
       else if (event.type === "tool_execution_end") emit({ type: "tool_end", id: event.toolCallId, name: event.toolName, isError: event.isError, result: boundedResult(event.result?.details ?? event.result), ms: event.durationMs });
     });
     await session.prompt(text);
     if (signal?.aborted) return emit({ type: "cancelled" });
+    if (stale()) return emit(disconnected);
     const failure = providerError(session);
     if (failure) emit({ type: "error", message: failure, ...(failure.includes(SETUP_HINT) ? { setup: true } : {}) });
     else emit({ type: "done", text: session.getLastAssistantText() ?? "" });
   } catch (e) {
     if (signal?.aborted) emit({ type: "cancelled" });
+    else if (stale()) emit(disconnected);
     else emit({ type: "error", message: e instanceof Error ? e.message : "The agent failed" });
   } finally {
     signal?.removeEventListener("abort", onAbort);
     unsubscribe();
     chat.busy = false;
+    if (chat.retired) chat.session?.dispose();
   }
 }
 
@@ -252,6 +400,8 @@ export interface ReadInput {
 }
 
 export async function readDeliveryEvidence(input: ReadInput): Promise<{ model: string; draft: unknown } | { error: string }> {
+  const epoch = credentialEpoch;
+  const changed = { error: "The agent connection changed (log out or new login) while reading. Read the evidence again." };
   const r = await resolveModel();
   if ("error" in r) return { error: r.error };
   const images: ImageContent[] = input.evidence.flatMap((e) => (e.data && e.mime?.startsWith("image/") ? [{ type: "image" as const, data: e.data, mimeType: e.mime }] : []));
@@ -273,9 +423,13 @@ export async function readDeliveryEvidence(input: ReadInput): Promise<{ model: s
     `Catalogue (code | model | variant | category):\n${input.catalogue.map((c) => `${c.code} | ${c.model} | ${c.variant} | ${c.category}`).join("\n")}`,
     "Read the evidence and call submit_receipt_draft once.",
   ];
+  if (epoch !== credentialEpoch) return changed;
   const session = await newSession(r, `${RECEIPT_READING_RULES}\nAlways answer by calling submit_receipt_draft exactly once, then stop.`, [submit]);
+  if (epoch !== credentialEpoch) { session.dispose(); return changed; }
+  extractions.add(session);
   try {
     await session.prompt(parts.join("\n\n"), { images });
+    if (epoch !== credentialEpoch) return changed;
     // Pi silently drops images it cannot decode; never let the model "read" a photo it never saw.
     const firstUser = session.messages.find((m) => m.role === "user") as { content?: unknown } | undefined;
     const seen = Array.isArray(firstUser?.content) ? firstUser.content.filter((c: { type?: string }) => c?.type === "image").length : 0;
@@ -283,8 +437,10 @@ export async function readDeliveryEvidence(input: ReadInput): Promise<{ model: s
     const failure = providerError(session);
     if (failure) return { error: `Reading failed: ${failure}` };
   } catch (e) {
+    if (epoch !== credentialEpoch) return changed;
     return { error: `Reading failed: ${e instanceof Error ? e.message : "unknown error"}` };
   } finally {
+    extractions.delete(session);
     session.dispose();
   }
   return draft ? { model: `${r.model.provider}/${r.model.id}`, draft } : { error: "The model returned no structured draft. Enter the counted lines by hand." };

@@ -47,6 +47,9 @@ export interface TranscriptLine {
 /** Local demo: what the Pi agent service reports (null until checked; never present in production). */
 export interface LocalAgentState {
   ready: boolean;
+  /** web = connected from Jarvis /login (server memory); preconfigured = Pi login / environment. */
+  connection?: "web" | "preconfigured" | "none";
+  loggedOut?: boolean;
   provider?: string;
   model?: string;
   modelName?: string;
@@ -117,6 +120,8 @@ export interface WareState {
   transcript: TranscriptLine[];
   micError: string | null;
   localAgent: LocalAgentState | null;
+  /** The masked Claude API key form is open (the key itself is never stored here). */
+  agentLoginOpen: boolean;
 
   settings: Settings;
 }
@@ -176,6 +181,7 @@ export const useWare = create<WareState>()(() => ({
   transcript: [],
   micError: null,
   localAgent: null,
+  agentLoginOpen: false,
 
   settings: readSettings(),
 }));

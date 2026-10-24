@@ -3,6 +3,8 @@ import {
   ArchiveRestoreIcon,
   ClockIcon,
   HandshakeIcon,
+  KeyRoundIcon,
+  LogOutIcon,
   PackageCheckIcon,
   ScanLineIcon,
   ShieldCheckIcon,
@@ -33,6 +35,30 @@ export const COMMANDS: Command[] = [
 ];
 
 export const commandsFor = (role: Role) => COMMANDS.filter((c) => c.roles.includes(role));
+
+/** Local demo: connecting the AI provider. Not warehouse panels, and never sent to a model. */
+export type AgentCommandId = "login" | "logout";
+export interface AgentCommand {
+  id: AgentCommandId;
+  label: string;
+  icon: LucideIcon;
+  keywords: string[];
+}
+
+export function agentCommands(connected: boolean): AgentCommand[] {
+  const login: AgentCommand = { id: "login", label: connected ? "Switch Claude API key" : "Log in with a Claude API key", icon: KeyRoundIcon, keywords: ["login", "connect", "api key", "claude", "sign in", "登录"] };
+  const logout: AgentCommand = { id: "logout", label: "Log out of the agent", icon: LogOutIcon, keywords: ["logout", "disconnect", "sign out", "退出"] };
+  return connected ? [logout, login] : [login];
+}
+
+/** "/login …" or "/logout …" typed or spoken into Jarvis. */
+export function agentCommandOf(text: string): AgentCommandId | null {
+  const m = text.trim().match(/^\/(login|logout)(?:\s|$)/i);
+  return m ? (m[1]!.toLowerCase() as AgentCommandId) : null;
+}
+
+/** Text that looks like an API key or token: never recorded in chat or sent to a model. */
+export const looksLikeSecret = (text: string) => /sk-ant-[A-Za-z0-9_-]{8,}|\bsk-[A-Za-z0-9_-]{24,}|\bsk_(live|test)_[A-Za-z0-9]{10,}/.test(text);
 
 export const commandById = (id: string) => COMMANDS.find((c) => c.id === id);
 

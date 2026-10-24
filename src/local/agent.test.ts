@@ -65,7 +65,7 @@ describe("warehouse analyst turn (mocked provider)", () => {
     faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "401 Unauthorized: invalid api key" })]);
     const events = await turn("session-badcreds-1", "Stock?");
     expect(events.at(-1)).toMatchObject({ type: "error" });
-    expect((events.at(-1) as { message: string }).message).toMatch(/rejected the credentials.*run `pi`, then `\/login`/);
+    expect(events.at(-1)).toMatchObject({ setup: true, message: expect.stringMatching(/rejected the credentials.*Log in in Jarvis \(or type \/login\)/) });
   });
 
   test("a busy conversation refuses a second simultaneous question; cancellation stops the turn", async () => {

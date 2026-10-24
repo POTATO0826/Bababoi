@@ -1,9 +1,10 @@
 import { ArrowUpIcon, CheckIcon, CircleSlashIcon, CornerDownRightIcon, MessageSquarePlusIcon, MicIcon, MicOffIcon, ScanLineIcon, SquareIcon, TriangleAlertIcon, WrenchIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { closeAgent, newAgentConversation, refreshLocalAgent, runCommand, scanNote, stopLocalAgent, toggleMute, voiceInputSupported } from "@/actions";
+import { closeAgent, logoutLocalAgent, newAgentConversation, openAgentLogin, refreshLocalAgent, runCommand, scanNote, stopLocalAgent, toggleMute, voiceInputSupported } from "@/actions";
+import { AgentLoginDialog } from "@/components/jarvis/agent-login-dialog";
 import { Badge } from "@/components/ui/badge";
 import { localDemo } from "@/identity";
-import { commandsFor } from "@/commands";
+import { agentCommands, commandsFor } from "@/commands";
 import { JarvisOrb, OrbStatus } from "@/components/jarvis/orb";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
@@ -51,7 +52,9 @@ export function JarvisChat({ drawer, className }: { drawer: boolean; className?:
   }, [chatFocus, chatDraft]);
 
   const slash = draft.startsWith("/") && !/\s/.test(draft);
-  const cmds = slash ? commandsFor(role).filter((c) => `${c.id} ${c.label} ${c.keywords.join(" ")}`.toLowerCase().includes(draft.slice(1).toLowerCase())) : [];
+  // Local demo: /login and /logout connect the AI provider; they are handled here, never sent to a model.
+  const menu = [...(localDemo ? agentCommands(localAgent?.ready === true) : []), ...commandsFor(role)];
+  const cmds = slash ? menu.filter((c) => `${c.id} ${c.label} ${c.keywords.join(" ")}`.toLowerCase().includes(draft.slice(1).toLowerCase())) : [];
   const pick = cmds[Math.min(active, Math.max(0, cmds.length - 1))];
 
   const send = (text: string) => {
@@ -112,6 +115,7 @@ export function JarvisChat({ drawer, className }: { drawer: boolean; className?:
       </div>
 
       {localDemo && <AgentStatusBar state={localAgent} />}
+      {localDemo && <AgentLoginDialog />}
 
       <MessageScrollerProvider autoScroll>
         <MessageScroller className="min-h-0 flex-1">
@@ -191,7 +195,7 @@ export function JarvisChat({ drawer, className }: { drawer: boolean; className?:
                     <c.icon />
                     <span className="font-mono text-muted-foreground">/{c.id}</span>
                     <span>{c.label}</span>
-                    {!!counts[c.id] && <span className="ml-auto font-mono text-xs text-brand-light">{counts[c.id]}</span>}
+                    {!!counts[c.id as keyof typeof counts] && <span className="ml-auto font-mono text-xs text-brand-light">{counts[c.id as keyof typeof counts]}</span>}
                   </CommandItem>
                 ))}
               </CommandGroup>
@@ -264,19 +268,27 @@ function AgentStatusBar({ state }: { state: LocalAgentState | null }) {
   }, [state]);
   if (!state) return <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-[11.5px] text-muted-foreground"><Spinner className="size-3" />Checking the local agent…</div>;
   if (state.ready) {
+    const name = state.provider === "anthropic" ? "Claude" : state.provider;
     return (
       <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-[11.5px] text-muted-foreground" title={state.modelName}>
-        <Badge variant="ok">Pi agent</Badge>
-        <span className="truncate font-mono">{state.provider}/{state.model}</span>
+        <Badge variant="ok">Connected · {name}</Badge>
+        <span className="min-w-0 truncate font-mono">{state.provider}/{state.model}</span>
+        {state.connection === "preconfigured" && <span className="text-faint" title="Connected through a provider set up on this computer before the demo started">preset</span>}
         {state.subscription && <span className="text-faint">subscription</span>}
         {state.readsPhotos === false && <span className="text-warn">no photo input</span>}
+        <Button variant="quiet" size="xs" className="ml-auto" onClick={() => void logoutLocalAgent()}>Log out</Button>
       </div>
     );
   }
   return (
     <div role="status" className="flex flex-col gap-1 border-b border-border px-3 py-2 text-[11.5px]">
-      <span className="flex items-center gap-2"><Badge variant="warn">Agent not connected</Badge><Button variant="quiet" size="xs" onClick={() => void refreshLocalAgent()}>Check again</Button></span>
-      <span className="text-muted-foreground">{state.reason}</span>
+      <span className="flex items-center gap-2">
+        <Badge variant="warn">Agent not connected</Badge>
+        <Button size="xs" onClick={openAgentLogin}>Log in</Button>
+        <Button variant="quiet" size="xs" className="ml-auto" onClick={() => void refreshLocalAgent()}>Check again</Button>
+      </span>
+      <span className="text-muted-foreground">{state.loggedOut ? "Logged out. Manual warehouse work continues; log in to use the assistant." : "Connect a Claude API key to use the warehouse assistant. Manual warehouse work does not need it."}</span>
+      {state.reason && !/Log in/.test(state.reason) && <span className="text-faint">{state.reason}</span>}
     </div>
   );
 }
@@ -325,7 +337,7 @@ function AgentReply({ text, turn }: { text: string; turn: AgentTurn }) {
       {turn.state === "error" && (
         <div role="alert" className="flex gap-1.5 rounded-md border border-dispatch/40 px-2 py-1.5 text-[12px] text-dispatch">
           <TriangleAlertIcon className="mt-0.5 size-3.5 flex-none" />
-          <span>{turn.setup ? "Agent not connected. " : "The agent could not answer. "}{turn.error}</span>
+          <span>{turn.setup ? "Agent not connected. " : "The agent could not answer. "}{turn.error}{turn.setup && <Button size="xs" variant="outline" className="mt-1.5 flex" onClick={openAgentLogin}>Log in</Button>}</span>
         </div>
       )}
       {turn.state === "cancelled" && <span className="flex items-center gap-1.5 px-1 text-[11.5px] text-muted-foreground"><CircleSlashIcon className="size-3" />Stopped</span>}
