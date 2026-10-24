@@ -15,7 +15,7 @@
     "test": "bun test src/domain src/voice src/local && vitest run",
     "test:backend": "vitest run",
     "test:browser": "bun tests/browser/run.ts",
-    "test:startup": "bun --no-env-file scripts/smoke-demo.ts",
+    "test:startup": "bun --no-env-file scripts/check-startup.ts",
     "check": "bun run test && bun run typecheck && bun run typecheck:backend && bun run build"
   },
   "dependencies": {

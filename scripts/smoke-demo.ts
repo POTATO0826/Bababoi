@@ -1,23 +1,16 @@
 // Start the real app twice in a disposable checkout, without operator credentials or shared data.
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, statSync, symlinkSync } from "node:fs";
+import { cpSync, mkdirSync, readdirSync, symlinkSync } from "node:fs";
 import { createServer } from "node:net";
-import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { childEnv } from "../src/local/isolation";
-import { findConvexNode } from "../src/local/node-runtime";
 
 const root = resolve(import.meta.dir, "..");
-const nodeDir = findConvexNode({
-  env: process.env, platform: process.platform, home: homedir(), which: (cmd) => Bun.which(cmd),
-  exists: existsSync, isDir: (p) => existsSync(p) && statSync(p).isDirectory(), listDir: readdirSync,
-  version: (bin) => { const r = Bun.spawnSync([bin, "--version"], { stdout: "pipe", stderr: "ignore" }); return r.exitCode === 0 ? r.stdout.toString() : null; },
-});
-// Keep the disposable copy on the checkout's drive. Convex component imports use path.relative;
-// a Windows TEMP on C: with dependencies on D: produces invalid ./D:/... imports.
-const smokeDir = join(root, ".convex");
-mkdirSync(smokeDir, { recursive: true });
-const scratch = mkdtempSync(join(smokeDir, "startup-"));
+// The outer harness owns creation/deletion; Windows releases fixture handles when this worker exits.
+const scratch = process.argv[2];
+const nodeDir = process.env.WAREORB_CONVEX_NODE;
+assert(scratch && dirname(scratch) === join(root, ".convex") && basename(scratch).startsWith("startup-"), "Run bun run test:startup");
+assert(nodeDir, "The outer startup harness must select Node");
 const fixture = join(scratch, "checkout");
 const excluded = new Set([".git", "node_modules", ".convex", ".pi", ".vercel", "dist", "out", "backups"]);
 const include = (path: string) => !excluded.has(basename(path)) && !basename(path).startsWith(".env") && !path.endsWith(".log");
@@ -123,14 +116,4 @@ try {
   await stop();
 } finally {
   await stop();
-  // Node handles Windows directory junctions and EBUSY retries; Bun's rmSync does not retry here.
-  const cleanup = Bun.spawn([
-    join(nodeDir, process.platform === "win32" ? "node.exe" : "node"), "-e",
-    "require('node:fs').rmSync(process.argv[1], { recursive: true, force: true, maxRetries: 20, retryDelay: 250 })",
-    scratch,
-  ], { cwd: root, env, stdin: "ignore", stdout: "ignore", stderr: "inherit" });
-  const timer = setTimeout(() => cleanup.kill(), 60000);
-  try { assert.equal(await cleanup.exited, 0, "Disposable test directory must be removed"); }
-  finally { clearTimeout(timer); }
 }
-console.log(`[startup] ${process.platform}: first run, frontend, authenticated inventory, no inherited API keys, restart persistence, shutdown and cleanup passed.`);
