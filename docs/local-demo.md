@@ -411,3 +411,43 @@ payloads and internal details go only to the server log, redacted. `src/local/br
 guards the visible strings, and the browser test checks the rendered page for Pi or SDK wording.
 Internally, the integration, dependencies, routes and behaviour are unchanged. Earlier evidence
 sections above quote the wording that was current when they were written.
+
+## Lalamove sandbox quotes: evidence and Mac acceptance (Claude Cloud, 24 October 2026)
+
+Verified in Cloud, all against the **mocked** Lalamove sandbox (signature-checking stand-in) and Pi's
+mocked provider. This is **not** live Lalamove or live-model evidence:
+
+- `bun install --frozen-lockfile && bun run check`: 303 Bun tests and 69 Convex tests pass, both
+  typechecks and the production build are clean.
+- `bun run test:browser`: 49/49 checks, including `/delivery` + Enter opening Delivery quotes, the
+  masked Lalamove form, a wrong secret refused, connect, Test connection, disconnect, no key or secret
+  in the page or browser storage, and Jarvis's Claude connection unaffected. Only signed
+  `GET /v3/cities` calls were made; no `/v3/orders`.
+- Not run in Cloud: the complete app against a local Convex backend (the backend binary download is
+  blocked there), and **any live Lalamove request** (no authorised sandbox credentials in Cloud;
+  keys from chat are never used).
+
+Mac acceptance (enter your current sandbox keys in the page only; quote-only, stock unchanged):
+
+1. `bun install --frozen-lockfile && bun run check && bun run test:browser`; then `bun run demo`.
+   Note the on-hand count of the SKU you will use.
+2. `/delivery` + Enter opens **Delivery quotes**. With no ready deals the page lists what a quote needs
+   and offers **Start sale from stock**.
+3. Lalamove card → **Connect** with a deliberately wrong secret: a clear error, still not connected.
+   Then your sandbox key and secret: **Connected · Lalamove sandbox**, `MY · <n> vehicle types`.
+   Refresh the page: still connected. **Test connection** succeeds.
+4. Start a sale from real local stock (or open a deal). Enter the buyer, a confirmed destination in the
+   Klang Valley and a collection time. Under **Shipment**, check the stock, quantity, pickup and
+   destination coordinates and the measurement source. Confirm or correct the package sizes and weights.
+5. Select a vehicle marked **Fits** → **Get sandbox quotes**. Expect a **Lalamove sandbox** quote with
+   the returned total in MYR, its breakdown, request time and returned expiry.
+6. Ask Jarvis "What does D-… still need for delivery, and what did Lalamove quote?". Expect
+   `get_delivery`/`get_delivery_quotes` tool cards whose totals match the screen exactly. Ask Jarvis to
+   quote a vehicle that does not fit: it refuses with the reason.
+7. Change the package weight (or quantity, destination or collection time). The earlier quote shows
+   as stale and a new request is needed.
+8. Enter oversize or overweight cargo: no vehicle fits and quotes are disabled. Clear a dimension:
+   cargo is unknown and quotes are refused.
+9. **Disconnect**: later quote requests (screen and Jarvis) are refused with "Lalamove isn't
+   connected". Restart the demo: disconnected again.
+10. Check the SKU's on-hand count is unchanged and no Lalamove order exists in the sandbox portal.
