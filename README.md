@@ -15,10 +15,10 @@
 
 | Field                  | Details                                                   |
 | ---------------------- | --------------------------------------------------------- |
-| **Team Name**          | _TODO_                                                    |
+| **Team Name**          | Bababoi                                                    |
 | **Team Domain**        | Domain 2 — Orbyte Smart SME Challenge                     |
-| **SDG Track (1–17)**   | SDG 8 — Decent Work and Economic Growth (targets 8.2, 8.3) |
-| **Team Leader**        | _TODO_                                                    |
+| **SDG Track (1–17)**   | SDG 8 and SDG 9 |
+| **Team Leader**        | Alfred Lee Khai Zher                                           |
 | **University**         | Taylor's University                                       |
 | **Number of Members**  | 3                                                         |
 
@@ -112,11 +112,7 @@ Convex — stock ledger, deals, quotes, receiving, replenish, audit log
 
 ## How to Run
 
-### Option 1 — Run on Replit
-
-_TODO: add the Replit project link and steps._
-
-### Option 2 — Run Locally
+### Option 1 — Run Locally
 
 Requires [Bun](https://bun.sh) and a free [Convex](https://convex.dev) account.
 
