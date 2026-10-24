@@ -27,9 +27,8 @@
 | Resource          | Link                                  |
 | ----------------- | ------------------------------------- |
 | GitHub Repository | https://github.com/POTATO0826/Bababoi |
-| Live Demo         | _TODO_                                |
-| RunPod Endpoint   | _TODO_                                |
-| Slide Deck        | _TODO_                                |
+| Live Demo         | _TODO                              |
+| Slide Deck        | https://canva.link/23u3t20hv0yk7dx                                |
 | Demo Video        | _TODO_                                |
 
 ---
