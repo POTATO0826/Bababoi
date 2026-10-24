@@ -1,5 +1,7 @@
 # Next agent: what to do (Stage B, the WareOrb pitch video)
 
+> **Status, 24 Oct 2026 (end of session):** steps 0 and 1 are done; the plan `pitch/pitch-plan.md` is approved; step 2 is in progress. Start from **`HANDOFF.md` §0**, which supersedes the status below.
+
 ## Paste this to start the next agent
 
 > You are continuing the WareOrb hackathon video production (Team Bababoi). The 21-second promo is **finished and
