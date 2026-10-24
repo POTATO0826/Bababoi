@@ -1,5 +1,7 @@
 # WareOrb video production: handoff (24 Oct 2026, Stage B in progress)
 
+> **25 Oct 2026: this file covers the separate 5–7 min pitch.** The immediate objective is now the **extended promo film**: see `NEXT-AGENT.md`, `VIDEO-EXTENSION-HANDOFF.md` and `VIDEO-CAPABILITY-AUDIT.md`. The `e935ae6` and Clerk assumptions below are outdated: `backend-production` @ `4c2cc97` has a no-login local demo (`bun run demo`).
+
 **This is the current handoff.** Earlier handoffs are kept unchanged:
 * `HANDOFF-promo.md`: the promo delivery, with rebuild commands and lessons learned. Read its §3 (rules) and §5 (lessons).
 * `HANDOFF-cowork.md`: the Cowork history.

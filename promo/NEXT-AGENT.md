@@ -1,121 +1,90 @@
-# Next agent: what to do (Stage B, the WareOrb pitch video)
+# Next agent: what to do (updated 25 Oct 2026)
 
-> **Status, 24 Oct 2026 (end of session):** steps 0 and 1 are done; the plan `pitch/pitch-plan.md` is approved; step 2 is in progress. Start from **`HANDOFF.md` §0**, which supersedes the status below.
+**Immediate objective: the extended WareOrb promo film** (≥ ~30 s; you choose the final length and the creative execution).
+
+It's separate from the official **5–7 min SDC Hackathon pitch video**: different length, and the pitch has a voice. The pitch's earlier brief is kept unchanged in `NEXT-AGENT-pitch-stageB.md`, and its plan in `pitch/pitch-plan.md`. Both rest on build assumptions that are now outdated; see `VIDEO-EXTENSION-HANDOFF.md` §6.
 
 ## Paste this to start the next agent
 
-> You are continuing the WareOrb hackathon video production (Team Bababoi). The 21-second promo is **finished and
-> approved**; do not re-render or change it unless the user asks. Your job is **Stage B: the 5–7 minute pitch video**,
-> with the promo as its cold open.
+> You are taking over WareOrb video production for Team Bababoi:
+> * Alfred Lee Khai Zher, team leader;
+> * Deng Zhenqun;
+> * Loo Yi Sheng.
 >
-> Start by reading, in this order:
-> 1. `promo/HANDOFF.md` (current state, rules, lessons);
-> 2. this file;
-> 3. `promo/storyboard.md`;
-> 4. `promo/pitch/problem-solution.md`;
-> 5. `promo/production-plan.md`.
+> The credit wording is "WareOrb — by Team Bababoi".
 >
-> The material is on branch `promo/wareorb-video` of `POTATO0826/Bababoi` (folder `promo/`). The full local package is in
-> `~/Documents/codes/Bababoi/out/wareorb-promo/` on the producer's Mac.
+> **Your job:** a premium cinematic **extended promo film of at least ~30 seconds** (30–45 s is a starting point; there's no fixed upper limit). It should show genuine inventory automation, meaningful human approvals, Lalamove **sandbox** quotation and Jarvis agent assistance, **only where they demonstrably work**. You decide the duration and the creative execution.
 >
-> Rules that override everything:
-> * real app behaviour only, with synthetic and simulated parts labelled;
-> * **human narration only, recorded by the team** (never AI or synthetic voice);
-> * no dependence on Anthropic, Lalamove, Fish, Codex or any external API;
-> * don't modify the product source;
-> * everything code-driven and deterministic;
-> * a review gate with the user before any final long render;
-> * the visual QA loop on the **encoded** file before saying anything is done.
+> **The existing 21 s promo** (`promo/WareOrb-promo-1080p.mp4`, SHA-256 `86640bae…`) is a finished, approved asset. Keep it unchanged. Make the longer film as a **new** file, and don't just slow the 21 s cut down.
 >
-> Before building anything, confirm the open questions in §1 with the user, then follow §2 step by step.
+> **Repository:** `POTATO0826/Bababoi`.
+> * Video branch: `promo/wareorb-video`, worktree `~/Documents/codes/Bababoi-promo-video`, folder `promo/`.
+> * Product source of truth: `backend-production` (audited at `4c2cc973ffccc2691019429605982b6d2989cd3f`). Read it only; never merge it into the video branch; never change business logic.
+>
+> **Read, in order:**
+> 1. `promo/NEXT-AGENT.md` (this file);
+> 2. `promo/VIDEO-EXTENSION-HANDOFF.md`;
+> 3. `promo/VIDEO-CAPABILITY-AUDIT.md`;
+> 4. `promo/storyboard.md`;
+> 5. `promo/HANDOFF-promo.md` §3 (rules) and §5 (lessons);
+> 6. `promo/render-instructions.md`.
+>
+> Then follow `VIDEO-EXTENSION-HANDOFF.md` §12 step by step. Start by fetching both branches (re-check the audit if `backend-production` moved), and **ask the user, in one round**:
+> * whether they will enter Lalamove sandbox keys and/or connect Jarvis (a Claude API key, or Pi's Codex login) in the page for filming;
+> * any duration preference;
+> * confirmation that the 21 s film stays a separate cut.
+>
+> **Rules that override everything:**
+> * real app behaviour only;
+> * synthetic data, test entries, sandbox quotes and fixtures always labelled;
+> * a sandbox quote is never a booking;
+> * Jarvis never approves, posts, buys or dispatches;
+> * no invented features, metrics or results;
+> * no AI or synthetic voice;
+> * deterministic, code-driven rendering;
+> * a review gate (keyframes, contact sheet, draft) before any final long render;
+> * the visual QA loop on the **encoded** file;
+> * keep every earlier version;
+> * never delete anything in `out/`;
+> * never commit credentials, `.env*`, frames or drafts;
+> * ask before pushing large binaries;
+> * no force-push.
+>
+> Answer the user in English.
 
----
+## Where things are
 
-## 1 · Ask the user or team first (blocking)
+| What | Where |
+|---|---|
+| Video docs and code | `~/Documents/codes/Bababoi-promo-video/promo/` (branch `promo/wareorb-video`) |
+| Large local outputs (frames, drafts, QA, exports, logs) | `~/Documents/codes/Bababoi/out/wareorb-promo/` (gitignored in the `backend` checkout; never commit there) |
+| Current product export, ready to run | `~/Documents/codes/Bababoi/out/wareorb-promo/app-backend-production-4c2cc97/`:<br>`env -u ANTHROPIC_BASE_URL WAREORB_DEMO_PORT=3350 WAREORB_CONVEX_PORT=3360 bun run demo`<br>No login. Port 3210 is used by another checkout. |
+| Evidence screenshots of the new UI | `~/Documents/codes/Bababoi/out/wareorb-promo/pitch/qa/backend-4c2cc97-screens/` |
+| The 21 s renderer | `promo/source/harness/src3/` (build: `OUTDIR=dist3b ENTRY=v3 bun run build.ts`); render: `promo/source/render/`; score: `promo/source/audio-src/` |
+| Evidence script (not the recording driver) | `promo/source/capture-backend/smoke-screens.mjs` |
 
-1. **Which app build to record.** Branch and commit. The promo used `Vince` @ `781687f`; `Vince` is now at `8f4d6df` (license only). `backend` / `backend-production` are in development. Is the app "ready enough" for the demo?
-2. **Pitch requirements.** The hackathon's required sections, maximum length, aspect ratio and deadline. The plan assumes about 6:10: cold open, problem, solution, demo, how it's built, impact plan, team.
-3. **Narration.** Has the team approved `pitch/problem-solution.md`? Who reads it? Where will the WAVs be delivered (48 kHz / 24-bit, one file per line)?
-4. **API keys.** Are any configured on the Convex deployment they want shown? Default: **no**. Keyed features (Read with AI, Lalamove quotes, Fish voice, Claude Jarvis) are then mentioned only as "wired in, needs a key", never shown working.
-5. **Cleanup permission** for the large local leftovers listed in `HANDOFF.md` §6.
+## Kept from earlier briefs (still true)
 
-## 2 · The work, in order
+* **Toolchain:** render with Google Chrome via `CHROME_PATH` (GPU). The Python venv is `promo/source/.venv`. Node 24 (keg-only, Homebrew) serves the local Convex backend.
+* **Use these skills' methods:**
+  * `onetake`: a palette in one room, carries between beats, the shutter, oracle-style checks;
+  * `brag`: about 0.3 s of reading time per word, no crossfades between busy layouts.
+* **Every lesson in `HANDOFF-promo.md` §5:**
+  * one React and one three.js in the bundle;
+  * frame purity (app clock `600 s + n/30`);
+  * every mover registered in `window.motionAt`;
+  * screen-fixed type at the integer frame;
+  * the press wave instead of cross-dissolves;
+  * result holds;
+  * grain against banding;
+  * explicit BT.709;
+  * QA on the encoded file.
+* **The team's narration** (for the pitch, not the promo) is human-recorded only. `pitch/problem-solution.md` is still waiting for the team's review.
 
-### Step 0: orientation and environment (no rendering yet)
+## The separate 5–7 min pitch (not the immediate task)
 
-* Read the documents above. Check the skills `onetake` and `brag` (`~/.claude/skills/`).
-  * Use onetake's methods: a palette in one room, carries between beats, the shutter, the oracle-style checks.
-  * Use brag's rules: reading time about 0.3 s per word; no crossfades between busy layouts.
-* Set up the toolchain as in `HANDOFF.md` §4, and run the smoke test: build, then render frames 401 and 615. They must look like `previews-v3b/keyframe-04.png` and `-06.png`.
-* **Done when:** the toolchain works and the smoke-test frames match.
-
-### Step 1: plan the pitch (a document; no renders)
-
-* Write `promo/pitch/pitch-plan.md`. For every section give: its time, the visuals and their source, the on-screen text, the narration file it uses, and a truth label on each claim (real / simulated / needs keys / proposed / hypothesis).
-* The cold open is `WareOrb-promo-1080p.mp4` (21.0 s) with its own score, ducked as the voice starts.
-* Problem and solution: reuse `pitch/problem-solution.md` (storyboard + script) as approved by the team.
-* **Done when** the user approves the plan.
-
-### Step 2: record the prototype demo (B1)
-
-Do this only once the user confirms the app build.
-
-* **Recording.**
-  * Record on the **Mac with the GPU**, with real clicks driven by Playwright. Frame-stepped capture in the cloud was ≥20× too slow.
-  * Reuse and update `source/capture/` (`capture-flow.mjs`, `step.mjs`, `steps/*.mjs`), whose selectors may have changed in the newer app.
-  * Run against a **local Convex backend with the app's seeded demo data**, reset before each take: `bunx convex dev` per the app's README; on Linux the self-hosted `convex-local-backend` was used.
-* **Chapters,** each with a visible recorded outcome:
-  1. receive and post;
-  2. ageing flag;
-  3. hand to sales;
-  4. buyer and quotes (Demo replies, labelled **Synthetic**);
-  5. approve (reserve, **simulated booking**);
-  6. confirm collection (bay freed);
-  7. history;
-  8. replenishment (press "Order 4" only if the team wants a purchase-order shown).
-* **Also produce:** an event log (time, action, screen position) for automatic zooms and captions, and full-quality frames or a lossless capture.
-* **Never fake an outcome.** If a step fails in the app, report it; don't patch around it on screen.
-* **Done when:** each chapter is recorded with its outcome visible, and you have looked at a contact sheet of every chapter.
-
-### Step 3: write the remaining narration (for human recording)
-
-* Sections still to write:
-  * the demo voice-over;
-  * "how it's built", with a real / simulated / needs-keys table taken from the code at the recorded commit;
-  * the impact plan (what will be measured and how; **no results, no invented metrics**);
-  * the team and close (Alfred Lee Khai Zher, team leader; Deng Zhenqun; Loo Yi Sheng; credit "Team Bababoi").
-* Follow the format of `pitch/problem-solution.md`: per-line timings at 140–150 wpm, a clean script, pronunciation notes, recording notes.
-* **Done when** the team has the full script to record.
-
-### Step 4: assemble the pitch (B5), code-driven
-
-* **Parts:** cold open, then title cards in the promo's design system (Geist, `#09090b`, the state colours), then the demo with automatic zoom-to-click from the event log, then the team's narration.
-* **Text:** captions plus an SRT file.
-* **Mix:** music ducked under the voice; the whole pitch at about −14 LUFS with true peak ≤ −1 dBTP. Check that the voice clearly leads.
-* **Review gate first:** keyframes, a contact sheet and a draft MP4. Then the final.
-* **QA:** run `qa_frames.py`, `qa_av.py` and `qa_encode.py` on the encoded pitch. Look at sheets every 0.5 s and at every transition. Write `render-instructions`-style notes with hashes.
-* **Done when** the user approves the final file after you have verified it.
-
-## 3 · Don't
-
-* Don't re-render or "improve" the delivered promo unless asked; its hash is recorded.
-* Don't use AI or synthetic voices, even as placeholders in a delivered file. A silent or caption-only draft is fine for timing.
-* Don't show keyed or unbuilt features as working.
-* Don't state benefits, savings or adoption as results.
-* Don't commit `frames/`, `drafts/`, `.venv`, `node_modules` or the Cowork transcript. Ask before pushing large binaries.
-* Don't delete anything in `out/` without the user's OK.
-
-## 4 · Useful facts
-
-* **App seeded personas:** J. Lim (Warehouse), Mei (Owner), Arif (Sales).
-* **The demo path the promo used:**
-  * DN-2291 → C-3-01;
-  * B-2140-A (120 days) → D-1001;
-  * three synthetic quotes, Carrier A RM280 lowest;
-  * Approve with net recovery RM920 ("before stock cost · not profit");
-  * SIM-7001 → "2 collected", A-1-01 freed;
-  * 3-Seater Sofa · Oatmeal +4 ("9 − 3 − 2 = 4").
-* **Brand tokens:**
-  * colours: bg `#09090b`; blue `#4F8BEA` / `#8db1f3`; violet `#a78bfa` (ageing); teal `#2dd4bf` (reserved); green `#22c55e` (freed); warn `#E3BD78`;
-  * type: Geist 600 / Geist Mono.
-* **Render speed** on the M1 Pro (GPU via `CHROME_PATH`): about 0.2–0.3 s per capture. A 630-frame film at dpr 2 with the shutter takes about 18–21 min on 3 workers.
+* **Plan:** `pitch/pitch-plan.md`, approved 24 Oct with decisions A–E. Its demo-build parts (`e935ae6`, Clerk sign-in) are outdated; the local no-login demo at `4c2cc97` replaces them.
+* **Status:** see `HANDOFF.md`.
+* **Still open:**
+  * the hackathon's rules (length, sections, aspect ratio, deadline), which the user didn't know yet;
+  * the team's narration review, and who narrates.

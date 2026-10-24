@@ -1,5 +1,7 @@
 # WareOrb pitch video: Stage B plan
 
+> **25 Oct 2026:** this plan is for the separate 5–7 min pitch. Its build assumptions (`e935ae6`, Clerk sign-in, decision A) are outdated: `backend-production` @ `4c2cc97` runs as a no-login local demo with Lalamove sandbox quotes and the Jarvis agent. Re-plan the demo against `VIDEO-CAPABILITY-AUDIT.md` before recording.
+
 **Approved by the user on 24 Oct 2026, with decisions A–E as recommended.** Decision A, the Clerk exception, covers a Clerk development instance used only to sign in test accounts. Nothing has been recorded or rendered for the pitch yet. The draft before approval is commit `608117a`.
 
 | | |
