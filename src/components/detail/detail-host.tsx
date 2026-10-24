@@ -12,6 +12,7 @@ export function DetailHost({ veryTight }: { veryTight: boolean }) {
   if (!detail) return null;
   return (
     <div
+      data-viewport-panel=""
       onPointerDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}

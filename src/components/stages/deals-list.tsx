@@ -65,6 +65,7 @@ export function DealsList({ view = "deals", className }: { view?: DealView; clas
 
   return (
     <WorkColumn title={v.title} className={className} aside={view === "deals" && <Button variant="quiet" size="xs" onClick={() => setShowHistory(!showHistory)}>{showHistory ? "Current work" : "All history"}</Button>} action={view === "deals" && role === "owner" && <Button variant="outline" onClick={() => setCreating(!creating)}>Start sale from stock</Button>}>
+      {/* The one new-sale form for every view (Deals header button or Delivery guide). */}
       {creating && <NewSale onDone={() => setCreating(false)} />}
       {showHistory && view === "deals" ? <WorkList label="All deals" count={history.results.length}>
         {history.results.map(row)}
@@ -75,7 +76,6 @@ export function DealsList({ view = "deals", className }: { view?: DealView; clas
         {view === "delivery" && localDemo && <LalamoveCard />}
         <WorkList label={view === "deals" ? "Open" : view === "delivery" ? "Ready for quotes" : undefined} count={open.length}>{open.map(row)}{!open.length && view !== "delivery" && <NothingHere title={v.empty} />}{!open.length && view === "delivery" && <DeliveryGuide onStart={() => setCreating(true)} canStart={role === "owner"} />}</WorkList>
         {view === "delivery" && <NeedsDetails />}
-        {view === "delivery" && creating && <NewSale onDone={() => setCreating(false)} />}
         {done.length > 0 && <WorkList label="Done">{done.map(row)}</WorkList>}
       </>}
     </WorkColumn>

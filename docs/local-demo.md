@@ -264,8 +264,8 @@ suppliers, carriers and staff names end in "(synthetic)". Phone numbers are plac
   appears on a fresh ledger outside demo mode. The no-cost and no-recent-sales cases are seeded.
 - The base sales history (orders O-5xxx) predates the current batches: it drives sales rates but is
   not subtracted from batch bays. Sales added by the scenarios (D-1006, the lamp) are.
-- The Inventory list's "Low stock" label uses the page's own threshold (`?lowStockThreshold=`,
-  default 4). The seeded business setting, used by Jarvis, is 2.
+- "Low stock" means available (on hand − reserved) at or below the business setting (seeded: 2). The
+  inventory list, map colours, badges and Jarvis all use that one setting; there is no page override.
 
 ## Troubleshooting
 

@@ -14,6 +14,7 @@ export function DetailsPanel({ veryTight }: { veryTight: boolean }) {
   const selected = useInventory().byCode.get(code ?? "");
   return (
     <div
+      data-viewport-panel=""
       onPointerDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}

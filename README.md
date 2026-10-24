@@ -11,7 +11,7 @@ bun run build    # static build into dist/
 bun run typecheck
 ```
 
-URL flags override the prototype's tweakable props: `?autoSpin=1`, `?voiceReplies=0`, `?lowStockThreshold=3`, `?showEmptyBays=0`.
+URL flags override the prototype's tweakable props: `?autoSpin=1`, `?voiceReplies=0`, `?showEmptyBays=0`. The low-stock threshold is the business setting (default 2), used alike by the inventory, map, badges and Jarvis.
 
 ## Layout
 

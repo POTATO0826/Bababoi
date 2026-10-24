@@ -62,9 +62,13 @@ export interface LocalAgentState {
 export interface Settings {
   autoSpin: boolean;
   voiceReplies: boolean;
+  /** The business setting from the ledger (LedgerSync), shared by inventory, map, badges and Jarvis. */
   lowStockThreshold: number;
   showEmptyBays: boolean;
 }
+
+/** The business default, used only until the ledger's own setting arrives. */
+export const DEFAULT_LOW_STOCK_THRESHOLD = 2;
 
 export const PEOPLE: Record<Role, string> = { owner: "Owner", sales: "Sales", warehouse: "Warehouse" };
 
@@ -133,14 +137,13 @@ export interface WareState {
 
 const params = () => (typeof location === "undefined" ? new URLSearchParams() : new URLSearchParams(location.search));
 
-function readSettings(): Settings {
-  const p = params();
+/** URL display flags. The low-stock threshold is a business setting, not a page flag. */
+export function readSettings(p: URLSearchParams = params()): Settings {
   const flag = (k: string, d: boolean) => (p.has(k) ? p.get(k) !== "0" && p.get(k) !== "false" : d);
-  const threshold = Number(p.get("lowStockThreshold"));
   return {
     autoSpin: flag("autoSpin", false),
     voiceReplies: flag("voiceReplies", true),
-    lowStockThreshold: Number.isFinite(threshold) && p.has("lowStockThreshold") ? threshold : 4,
+    lowStockThreshold: DEFAULT_LOW_STOCK_THRESHOLD,
     showEmptyBays: flag("showEmptyBays", true),
   };
 }

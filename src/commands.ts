@@ -43,13 +43,18 @@ export interface AgentCommand {
   label: string;
   icon: LucideIcon;
   keywords: string[];
+  /** Offered only once typed: a bare "/" + Enter must never disconnect Jarvis. */
+  explicit?: boolean;
 }
 
 export function agentCommands(connected: boolean): AgentCommand[] {
   const login: AgentCommand = { id: "login", label: connected ? "Switch Jarvis's Claude API key" : "Connect Jarvis with a Claude API key", icon: KeyRoundIcon, keywords: ["login", "connect", "api key", "claude", "sign in", "登录"] };
-  const logout: AgentCommand = { id: "logout", label: "Log Jarvis out (disconnect Claude)", icon: LogOutIcon, keywords: ["logout", "disconnect", "sign out", "退出"] };
+  const logout: AgentCommand = { id: "logout", label: "Log Jarvis out (disconnect Claude)", icon: LogOutIcon, keywords: ["logout", "disconnect", "sign out", "退出"], explicit: true };
   return connected ? [logout, login] : [login];
 }
+
+/** The "/" menu: warehouse panels first, then connecting Jarvis (local demo). */
+export const slashMenu = (role: Role, agent: AgentCommand[] = []) => [...commandsFor(role), ...agent];
 
 /** "/login …" or "/logout …" typed or spoken into Jarvis. */
 export function agentCommandOf(text: string): AgentCommandId | null {
@@ -64,11 +69,11 @@ export const looksLikeSecret = (text: string) => /sk-ant-[A-Za-z0-9_-]{8,}|\bsk-
  * Slash-menu suggestions for what was typed after "/". An exact command id wins, then ids and labels that start
  * with the text, then any other match (including keywords); ties keep the menu's own order.
  */
-export function rankCommands<T extends { id: string; label: string; keywords: readonly string[] }>(items: readonly T[], typed: string): T[] {
+export function rankCommands<T extends { id: string; label: string; keywords: readonly string[]; explicit?: boolean }>(items: readonly T[], typed: string): T[] {
   const q = typed.trim().toLowerCase();
   const score = (c: T) => {
     const id = c.id.toLowerCase(), label = c.label.toLowerCase();
-    if (!q) return 3;
+    if (!q) return c.explicit ? -1 : 3;
     if (id === q) return 0;
     if (id.startsWith(q)) return 1;
     if (label.startsWith(q)) return 2;

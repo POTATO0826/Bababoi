@@ -3,7 +3,7 @@ import { lazy, Suspense, useEffect, useRef, type PointerEvent as ReactPointerEve
 import { backToOverview, escapeZone, resetCamera, setView, switchFloor } from "@/actions";
 import { DetailHost } from "@/components/detail/detail-host";
 import { DetailsPanel } from "@/components/viewport/details-panel";
-import { dragState } from "@/interaction";
+import { dragState, wheelZoomsMap } from "@/interaction";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { totals, type FloorId } from "@/data/catalog";
@@ -28,11 +28,13 @@ export function Viewport({ className }: { className?: string }) {
   const dragging = useWare((s) => s.dragging);
   const drag = useRef<{ x: number; theta: number; moved: boolean; id: number } | null>(null);
 
-  // Wheel zoom needs a non-passive listener so the page doesn't scroll.
+  // Wheel zoom needs a non-passive listener so the page doesn't scroll. It runs before React's handlers,
+  // so popups on the map are excluded here: their own content must scroll.
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
+      if (!wheelZoomsMap(e.target)) return;
       e.preventDefault();
       const f = e.deltaY < 0 ? 1.12 : 1 / 1.12;
       setWare((s) => ({ zoomMul: Math.min(3.5, Math.max(0.6, s.zoomMul * f)), hoverBay: null }));

@@ -4,7 +4,7 @@ import { closeAgent, logoutLocalAgent, newAgentConversation, openAgentLogin, ref
 import { AgentLoginDialog } from "@/components/jarvis/agent-login-dialog";
 import { Badge } from "@/components/ui/badge";
 import { localDemo } from "@/identity";
-import { agentCommands, commandsFor, rankCommands } from "@/commands";
+import { agentCommands, rankCommands, slashMenu } from "@/commands";
 import { modelLabel, providerLabel } from "@/local/agent-client";
 import { JarvisOrb, OrbStatus } from "@/components/jarvis/orb";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -54,7 +54,7 @@ export function JarvisChat({ drawer, className }: { drawer: boolean; className?:
 
   const slash = draft.startsWith("/") && !/\s/.test(draft);
   // Local demo: /login and /logout connect the AI provider; they are handled here, never sent to a model.
-  const menu = [...(localDemo ? agentCommands(localAgent?.ready === true) : []), ...commandsFor(role)];
+  const menu = slashMenu(role, localDemo ? agentCommands(localAgent?.ready === true) : []);
   // An exact command (e.g. "/delivery") is first, so Enter runs it; arrows can still choose another.
   const cmds = slash ? rankCommands(menu, draft.slice(1)) : [];
   const pick = cmds[Math.min(active, Math.max(0, cmds.length - 1))];

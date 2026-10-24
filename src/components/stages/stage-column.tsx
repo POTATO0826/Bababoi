@@ -17,7 +17,8 @@ export function StageColumn({ wide, className }: { wide: boolean; className?: st
     case "delivery":
     case "approve":
     case "collect":
-      return <DealsList view={stage} className={className} />;
+      // Keyed by view: an open form or history toggle from Deals must not reappear in Delivery.
+      return <DealsList key={stage} view={stage} className={className} />;
     case "replenish":
       return <ReplenishList className={className} />;
     default:

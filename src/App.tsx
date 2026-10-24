@@ -2,13 +2,13 @@ import { SignInButton } from "@clerk/react";
 import { useAction, useConvexAuth, useQuery } from "convex/react";
 import { useEffect, useState } from "react";
 import { api } from "@convex/_generated/api";
-import { openAgent } from "@/actions";
+import { openAgent, refreshLocalAgent } from "@/actions";
 import { closePanel } from "@/commands";
 import { Header } from "@/components/header";
 import { LedgerSync } from "@/components/ledger-sync";
 import { StageColumn } from "@/components/stages/stage-column";
 import { ReceiveDialog } from "@/components/inventory/receive-dialog";
-import { LalamoveConnectDialog } from "@/components/delivery/lalamove-connection";
+import { LalamoveConnectDialog, refreshLalamove } from "@/components/delivery/lalamove-connection";
 import { JarvisChat } from "@/components/jarvis/jarvis-chat";
 import { Viewport } from "@/components/viewport/viewport";
 import { Toaster } from "@/components/ui/sonner";
@@ -49,6 +49,27 @@ function useShortcuts() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, []);
+}
+
+/** Local demo: keep the Jarvis and Lalamove badges true to the server, which another tab may have changed. */
+export const STATUS_REFRESH_MS = 15_000;
+function useLiveConnectionStatus() {
+  useEffect(() => {
+    if (!localDemo) return;
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      void refreshLocalAgent();
+      void refreshLalamove();
+    };
+    const t = setInterval(refresh, STATUS_REFRESH_MS);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   }, []);
 }
 
@@ -124,6 +145,7 @@ function AccessScreen({ title, description, children }: { title: string; descrip
 
 function Workspace({ profile }: { profile: StaffProfile }) {
   useShortcuts();
+  useLiveConnectionStatus();
   const { tier } = useLayoutTier();
   const agentOpen = useWare((s) => s.agentOpen);
   const drawer = tier === "narrow" || tier === "stacked";

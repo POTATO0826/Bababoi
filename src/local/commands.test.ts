@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { agentCommandOf, agentCommands, commandsFor, looksLikeSecret, rankCommands } from "../commands";
+import { agentCommandOf, agentCommands, looksLikeSecret, rankCommands, slashMenu } from "../commands";
 
-const ids = (typed: string, role: "owner" | "sales" | "warehouse" = "owner", connected = false) => rankCommands([...agentCommands(connected), ...commandsFor(role)], typed).map((c) => c.id);
+// The same menu the Jarvis chat builds.
+const ids = (typed: string, role: "owner" | "sales" | "warehouse" = "owner", connected = false) => rankCommands(slashMenu(role, agentCommands(connected)), typed).map((c) => c.id);
 
 describe("slash-menu ranking", () => {
   test("/delivery: the exact command is first even though Receive's keyword 'delivery note' matches", () => {
@@ -12,7 +13,14 @@ describe("slash-menu ranking", () => {
     expect(ids("de")).toEqual(["deals", "delivery", "login", "receive", "replenish"]); // "Claude" label, "delivery note"/"reorder" keywords
     expect(ids("re")).toEqual(["receive", "replenish", "approve"]);
     expect(ids("quote")).toEqual(["delivery"]);
-    expect(ids("")).toEqual(["login", "receive", "ageing", "deals", "delivery", "approve", "collect", "replenish"]);
+    expect(ids("")).toEqual(["receive", "ageing", "deals", "delivery", "approve", "collect", "replenish", "login"]);
+  });
+  test("a bare / + Enter opens a warehouse panel and never logs Jarvis out", () => {
+    const connected = ids("", "owner", true);
+    expect(connected[0]).toBe("receive");
+    expect(connected).not.toContain("logout");
+    expect(ids("logout", "owner", true)[0]).toBe("logout");
+    expect(ids("lo", "owner", true)).toContain("logout");
   });
   test("role restrictions and /login, /logout are kept", () => {
     expect(ids("approve", "sales")).toEqual([]);
