@@ -55,6 +55,7 @@ export function planPlacement(sku: SkuLike, units: number, batches: readonly Bat
 
 /** Which bays to take `qty` units from: whole bays first (so they free up), in bay order. */
 export function planPick(locations: readonly Loc[], qty: number): Loc[] {
+  if (!Number.isSafeInteger(qty) || qty <= 0) throw new Error("Pick quantity must be a positive whole number.");
   const sorted = [...locations].filter((l) => l.qty > 0).sort((a, b) => slotOrder(a.slot) - slotOrder(b.slot));
   const take = new Map<string, number>();
   let left = qty;
@@ -80,6 +81,12 @@ export function planPick(locations: readonly Loc[], qty: number): Loc[] {
 
 /** Remove picked units from a batch's bays; empty bays drop out (and so become free). */
 export function applyPick(locations: readonly Loc[], pick: readonly Loc[]): Loc[] {
+  const seen = new Set<string>();
+  for (const p of pick) {
+    if (seen.has(p.slot) || !Number.isSafeInteger(p.qty) || p.qty <= 0) throw new Error("Invalid or repeated pick bay.");
+    if (!locations.some((l) => l.slot === p.slot)) throw new Error(`Bay ${p.slot} is not in this allocation.`);
+    seen.add(p.slot);
+  }
   return locations
     .map((l) => {
       const p = pick.find((x) => x.slot === l.slot);

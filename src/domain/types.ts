@@ -8,6 +8,7 @@ export type Role = "owner" | "sales" | "warehouse";
 export interface Actor {
   role: Role;
   name: string;
+  staffId?: string;
 }
 
 /** Units of one batch sitting in one bay. */

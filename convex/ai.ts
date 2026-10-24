@@ -9,6 +9,7 @@ import type { Id } from "./_generated/dataModel";
 import { action, env, internalAction, type ActionCtx } from "./_generated/server";
 import { sanitizeSvg } from "../src/domain/svg";
 import { fit, piecesFor } from "../src/domain/vehicle";
+import { getActionActor } from "./access";
 
 const MODEL = () => env.CLAUDE_MODEL || "claude-opus-5";
 // Server-side refusal fallback: a declined request is re-run on Anthropic's recommended model.
@@ -59,15 +60,20 @@ const RECEIPT_SCHEMA: Record<string, unknown> = {
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
 export const extractReceipt = internalAction({
-  args: { receiptId: v.id("receipts") },
-  handler: async (ctx, { receiptId }): Promise<null> => {
-    const done = async (a: Omit<FunctionArgs<typeof internal.receiving.setExtraction>, "receiptId">): Promise<null> =>
-      await ctx.runMutation(internal.receiving.setExtraction, { receiptId, ...a });
+  args: { receiptId: v.id("receipts"), jobVersion: v.number() },
+  handler: async (ctx, { receiptId, jobVersion }): Promise<null> => {
+    const done = async (a: Omit<FunctionArgs<typeof internal.receiving.setExtraction>, "receiptId" | "jobVersion">): Promise<null> =>
+      await ctx.runMutation(internal.receiving.setExtraction, { receiptId, jobVersion, ...a });
+    let data;
+    try {
+      data = await ctx.runQuery(internal.receiving.forExtraction, { receiptId, jobVersion });
+    } catch {
+      return await done({ status: "error", error: "Reading could not start. Check catalogue limits and try again." });
+    }
+    if (!data) return await done({ status: "error", error: "Reading cancelled because the receipt or requester changed. Ask active staff to retry." });
     const anthropic = claude();
     if (!anthropic) return await done({ status: "error", error: "AI reading is off (no ANTHROPIC_API_KEY) — enter lines by hand" });
     if (!(await slot(ctx))) return await done({ status: "error", error: "Busy — try again in a minute" });
-    const data = await ctx.runQuery(internal.receiving.forExtraction, { receiptId });
-    if (!data) return null;
 
     const content: Anthropic.Beta.BetaContentBlockParam[] = [];
     for (const e of data.evidence) {
@@ -142,8 +148,9 @@ Requirements:
 - No text, no <script>, no <image>, no <foreignObject>, no external references, no event attributes.`;
 
 export const generateIcon = internalAction({
-  args: { code: v.string() },
-  handler: async (ctx, { code }): Promise<null> => {
+  args: { code: v.string(), staffId: v.optional(v.string()) },
+  handler: async (ctx, { code, staffId }): Promise<null> => {
+    if (!staffId || !(await ctx.runQuery(internal.access.providerStaffActive, { staffId, roles: ["owner", "warehouse"] }))) return null;
     const sku = await ctx.runQuery(internal.aiData.skuForIcon, { code });
     if (!sku) return null;
     const anthropic = claude();
@@ -152,6 +159,10 @@ export const generateIcon = internalAction({
       return null;
     }
     try {
+      if (!(await slot(ctx))) {
+        await ctx.runMutation(internal.aiData.setIcon, { code, status: "failed" });
+        return null;
+      }
       const res = await anthropic.beta.messages.create({
         model: MODEL(),
         max_tokens: 16000,
@@ -252,7 +263,8 @@ export const jarvisAsk = action({
     text: v.string(),
     context: v.object({ stage: v.string(), selected: v.union(v.string(), v.null()), dealId: v.union(v.string(), v.null()) }),
   },
-  handler: async (ctx, { actor, text, context }): Promise<{ reply: string; effects: Effect[]; unavailable?: true }> => {
+  handler: async (ctx, { text, context }): Promise<{ reply: string; effects: Effect[]; unavailable?: true }> => {
+    const actor = await getActionActor(ctx);
     const anthropic = claude();
     if (!anthropic) return { reply: "", effects: [], unavailable: true };
     if (!(await slot(ctx))) return { reply: "I'm busy for a moment, try again.", effects: [] };

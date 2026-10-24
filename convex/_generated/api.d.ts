@@ -10,6 +10,7 @@
 
 import type * as ai from "../ai.js";
 import type * as aiData from "../aiData.js";
+import type * as access from "../access.js";
 import type * as deals from "../deals.js";
 import type * as http from "../http.js";
 import type * as lalamove from "../lalamove.js";
@@ -28,6 +29,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  access: typeof access;
   ai: typeof ai;
   aiData: typeof aiData;
   deals: typeof deals;

@@ -3,15 +3,6 @@ import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Actor, Role } from "../src/domain/types";
 
-const ROLE_NAME: Record<Role, string> = { owner: "Owner", sales: "Sales", warehouse: "Warehouse" };
-
-/** Simulated roles: the client says who is acting, and every write checks it here. */
-export function requireRole(actor: Actor, ...allowed: Role[]) {
-  if (!allowed.includes(actor.role)) {
-    throw new ConvexError(`${allowed.map((r) => ROLE_NAME[r]).join(" or ")} only`);
-  }
-}
-
 export function fail(message: string): never {
   throw new ConvexError(message);
 }
@@ -25,7 +16,7 @@ export async function getSettings(ctx: QueryCtx): Promise<Doc<"settings">> {
     .query("settings")
     .withIndex("by_key", (q) => q.eq("key", "main"))
     .unique();
-  return s ?? fail("Run the seed first");
+  return s ?? fail("Ask the owner to complete business setup");
 }
 
 export async function skuByCode(ctx: QueryCtx, code: string) {
@@ -36,17 +27,21 @@ export async function skuByCode(ctx: QueryCtx, code: string) {
 }
 
 export async function activeBatches(ctx: QueryCtx) {
-  return await ctx.db
+  const rows = await ctx.db
     .query("batches")
     .withIndex("by_status", (q) => q.eq("status", "active"))
-    .take(1000);
+    .take(1001);
+  if (rows.length > 1000) fail("Active batch limit reached; archive or paginate inventory before continuing");
+  return rows;
 }
 
 export async function activeReservations(ctx: QueryCtx) {
-  return await ctx.db
+  const rows = await ctx.db
     .query("reservations")
     .withIndex("by_status", (q) => q.eq("status", "active"))
-    .take(1000);
+    .take(1001);
+  if (rows.length > 1000) fail("Active reservation limit reached; reconcile allocations before continuing");
+  return rows;
 }
 
 /** Short sequential-looking codes ("D-1042"). */

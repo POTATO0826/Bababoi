@@ -6,6 +6,8 @@ export interface DealFieldsLike {
   qty: number;
   priceSen: number;
   destination?: { lat: number; lng: number; confirmedBy?: string };
+  collectAt?: number;
+  access?: { floor: number; lift: boolean };
 }
 
 export function missingFields(d: DealFieldsLike): string[] {
@@ -16,6 +18,8 @@ export function missingFields(d: DealFieldsLike): string[] {
   if (!d.destination) m.push("Destination");
   else if (!inMalaysia(d.destination.lat, d.destination.lng)) m.push("Valid coordinates");
   else if (!d.destination.confirmedBy) m.push("Confirm location");
+  if (!Number.isFinite(d.collectAt) || (d.collectAt ?? 0) <= 0) m.push("Collection time");
+  if (!d.access || !Number.isSafeInteger(d.access.floor) || d.access.floor < 0 || d.access.floor > 200) m.push("Delivery access");
   return m;
 }
 

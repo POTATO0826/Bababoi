@@ -33,6 +33,12 @@ export const DEAL_STATUS: Record<DealStatus, { label: string; tone: BadgeTone; t
 
 export const isOpenDeal = (d: Pick<Deal, "status">) => (OPEN_DEAL as readonly string[]).includes(d.status);
 
+/** Only the period with recorded observations can support sales-rate claims. */
+export function historyFrom(ledger: Snapshot): number {
+  if (!ledger.settings.demoMode) return ledger.settings.seededAt;
+  return ledger.movements.reduce((start, movement) => Math.min(start, movement.at), ledger.settings.seededAt);
+}
+
 export function flagsOf(ledger: Snapshot | null, now: number): BatchFlag[] {
   if (!ledger) return [];
   return flagBatches({
@@ -41,7 +47,7 @@ export function flagsOf(ledger: Snapshot | null, now: number): BatchFlag[] {
     movements: ledger.movements,
     rule: ledger.settings.ageing,
     now,
-    historyFrom: ledger.settings.seededAt - 90 * DAY,
+    historyFrom: historyFrom(ledger),
   });
 }
 
@@ -65,7 +71,7 @@ export function suggestionsOf(ledger: Snapshot | null, now: number): ReplenishRo
   if (!ledger) return [];
   const { replenish } = ledger.settings;
   const sales = netSalesBySku(ledger.movements, now - replenish.windowDays * DAY);
-  const historyDays = Math.floor((now - (ledger.settings.seededAt - 90 * DAY)) / DAY);
+  const historyDays = Math.max(0, Math.floor((now - historyFrom(ledger)) / DAY));
   const freeBays = freeSlotSet(ledger.batches).size;
   const openPoSen = ledger.purchaseOrders.reduce((a, p) => {
     const sku = ledger.skus.find((x) => x.code === p.skuCode);

@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { run } from "@/convex";
 import { fmtRM } from "@/domain/money";
-import { actorNow, PEOPLE, useWare } from "@/store";
+import { actorNow, useWare } from "@/store";
 import { DEAL_STATUS, isOpenDeal, useFlags } from "@/workflow";
 import { DetailShell, Facts, Section } from "./detail-shell";
 
@@ -41,12 +41,12 @@ export function BatchDetail({ id }: { id: string }) {
             disabled={role !== "owner"}
             title={role !== "owner" ? "Owner only" : undefined}
             onClick={async () => {
-              const dealId = await run(create({ actor: actorNow(), batchId: id as Id<"batches">, assignee: PEOPLE.sales }), `Sent to ${PEOPLE.sales}`);
+              const dealId = await run(create({ actor: actorNow(), batchId: id as Id<"batches">, assignee: actorNow().name }), "Sale started");
               if (dealId) openDeal({ _id: dealId, skuCode: flag.batch.skuCode, batchId: id as Id<"batches"> }, flag.batch.locations[0]?.slot);
             }}
           >
             <SendIcon data-icon="inline-start" />
-            Hand to {PEOPLE.sales}
+            Start sale
           </Button>
         )
       }

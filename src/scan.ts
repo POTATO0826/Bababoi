@@ -20,7 +20,9 @@ export async function shrink(file: File): Promise<Blob> {
 
 export async function uploadTo(url: string, blob: Blob) {
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": blob.type || "application/octet-stream" }, body: blob });
-  const { storageId } = (await res.json()) as { storageId: Id<"_storage"> };
+  if (!res.ok) throw new Error("Evidence upload failed. Please try again.");
+  const { storageId } = (await res.json()) as { storageId?: Id<"_storage"> };
+  if (!storageId) throw new Error("Upload did not return an evidence ID");
   return storageId;
 }
 
@@ -29,11 +31,14 @@ export async function scanToReceipt(file: File, receiptId?: Id<"receipts">): Pro
   try {
     const actor = actorNow();
     const id = receiptId ?? (await convex.mutation(api.receiving.create, { actor }));
+    const receipt = await convex.query(api.receiving.get, { receiptId: id });
+    if (!receipt) throw new Error("Receipt not found");
     const url = await convex.mutation(api.receiving.generateUploadUrl, { actor });
-    const storageId = await uploadTo(url, await shrink(file));
+    const blob = await shrink(file);
+    const storageId = await uploadTo(url, blob);
     const kind = file.type === "application/pdf" ? "document" : "photo";
-    await convex.mutation(api.receiving.addEvidence, { actor, receiptId: id, kind, storageId, mime: file.type === "application/pdf" ? file.type : "image/jpeg" });
-    await convex.mutation(api.receiving.requestExtraction, { actor, receiptId: id });
+    const version = await convex.mutation(api.receiving.addEvidence, { actor, receiptId: id, expectedVersion: receipt.version ?? 1, kind, storageId, mime: blob.type || file.type });
+    await convex.mutation(api.receiving.requestExtraction, { actor, receiptId: id, expectedVersion: version });
     openCommand("receive");
     setWare({ detail: { kind: "receipt", id }, floor: 1, zone: null, selected: null });
     return { ok: true, receiptId: id };

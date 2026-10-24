@@ -8,7 +8,7 @@ const http = httpRouter();
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
   "Access-Control-Max-Age": "86400",
 };
 
@@ -21,6 +21,7 @@ http.route({
   path: "/voice/tts",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
+    await ctx.runQuery(internal.access.actionViewer, {});
     if (!env.FISH_API_KEY) return json({ error: "Voice is off (no FISH_API_KEY)" }, 501);
     const body: unknown = await req.json().catch(() => null);
     const text = typeof (body as { text?: unknown } | null)?.text === "string" ? (body as { text: string }).text.trim() : "";
@@ -58,6 +59,7 @@ http.route({
   path: "/voice/asr",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
+    await ctx.runQuery(internal.access.actionViewer, {});
     const url = new URL(req.url);
     const lang = url.searchParams.get("lang");
     const keep = url.searchParams.get("keep") === "1";

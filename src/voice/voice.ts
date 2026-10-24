@@ -1,6 +1,7 @@
 // Voice in/out. Fish Audio via Convex HTTP actions (keys stay on the server); the browser's own speech is the fallback.
 import type { Id } from "@convex/_generated/dataModel";
 import { convexSiteUrl } from "@/convex";
+import { authHeaders } from "@/auth-token";
 import type { Lang } from "@/store";
 
 interface RecognitionLike {
@@ -112,19 +113,26 @@ export function recordUtterance(opts: { maxMs?: number; silenceMs?: number; lang
 
 /** Speech → text: Fish ASR on the server; the browser's transcript if Fish is unavailable. */
 export async function transcribe(u: Utterance, lang: Lang, opts: { keep?: boolean } = {}): Promise<{ text: string; storageId?: Id<"_storage">; via: "fish" | "browser" }> {
+  const fallback = u.browserText.trim();
   if (u.blob) {
     try {
+      const auth = await authHeaders();
+      if (!auth) return { text: fallback, via: "browser" };
       const q = new URLSearchParams({ lang, ...(opts.keep ? { keep: "1" } : {}) });
-      const res = await fetch(`${convexSiteUrl}/voice/asr?${q}`, { method: "POST", headers: { "Content-Type": u.blob.type }, body: u.blob });
-      if (res.ok) {
-        const j = (await res.json()) as { text?: string; storageId?: Id<"_storage"> };
-        if (j.text?.trim()) return { text: j.text.trim(), storageId: j.storageId, via: "fish" };
-      }
+      const res = await fetch(`${convexSiteUrl}/voice/asr?${q}`, { method: "POST", headers: { ...auth, "Content-Type": u.blob.type }, body: u.blob });
+      // The endpoint stores receiving audio before attempting optional transcription.
+      // Its unavailable/busy/error responses can therefore still carry valid evidence.
+      const body: unknown = await res.json().catch(() => null);
+      const reply = body && typeof body === "object" ? body as { text?: unknown; storageId?: unknown } : null;
+      const storageId = typeof reply?.storageId === "string" && reply.storageId ? reply.storageId as Id<"_storage"> : undefined;
+      const text = typeof reply?.text === "string" ? reply.text.trim() : "";
+      if (res.ok && text) return { text, ...(storageId ? { storageId } : {}), via: "fish" };
+      return { text: fallback, ...(storageId ? { storageId } : {}), via: "browser" };
     } catch {
-      // fall back below
+      // A connection failure has no confirmed storage result; keep the browser transcript.
     }
   }
-  return { text: u.browserText, via: "browser" };
+  return { text: fallback, via: "browser" };
 }
 
 let audio: HTMLAudioElement | null = null;
@@ -133,9 +141,11 @@ let audio: HTMLAudioElement | null = null;
 export async function say(text: string, lang: Lang): Promise<void> {
   stopSpeaking();
   try {
+    const auth = await authHeaders();
+    if (!auth) return await browserSay(text, lang);
     const res = await fetch(`${convexSiteUrl}/voice/tts`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...auth, "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
     });
     if (res.ok && res.headers.get("Content-Type")?.startsWith("audio/")) {

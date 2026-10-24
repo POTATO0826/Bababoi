@@ -1,7 +1,8 @@
 import type { Id, TableNames } from "./_generated/dataModel";
-import { internalMutation, mutation, type MutationCtx } from "./_generated/server";
+import { env, internalMutation, mutation, type MutationCtx } from "./_generated/server";
 import { actor } from "./schema";
-import { audit, requireRole } from "./lib";
+import { audit, fail } from "./lib";
+import { getActor } from "./access";
 import { buildSeed } from "../src/domain/seed";
 
 const TABLES: TableNames[] = [
@@ -87,6 +88,7 @@ async function load(ctx: MutationCtx) {
 export const run = internalMutation({
   args: {},
   handler: async (ctx) => {
+    if (env.WAREORB_ALLOW_DEMO_SEED !== "true") fail("Demo data is disabled on this deployment");
     await wipe(ctx);
     await load(ctx);
     return null;
@@ -96,8 +98,9 @@ export const run = internalMutation({
 /** Owner "Reset demo": only while the deployment is in demo mode. */
 export const reset = mutation({
   args: { actor },
-  handler: async (ctx, { actor }) => {
-    requireRole(actor, "owner");
+  handler: async (ctx) => {
+    const actor = await getActor(ctx, "owner");
+    if (env.WAREORB_ALLOW_DEMO_SEED !== "true") fail("Demo data is disabled on this deployment");
     const settings = await ctx.db
       .query("settings")
       .withIndex("by_key", (q) => q.eq("key", "main"))
@@ -110,12 +113,17 @@ export const reset = mutation({
   },
 });
 
-/** Seed on first load if the deployment is empty. */
+/** Compatibility setup: never creates synthetic business records. */
 export const ensure = mutation({
   args: {},
   handler: async (ctx) => {
-    const any = await ctx.db.query("settings").first();
-    if (!any) await load(ctx);
+    await getActor(ctx, "owner");
+    const existing = await ctx.db.query("settings").withIndex("by_key", (q) => q.eq("key", "main")).unique();
+    if (!existing) await ctx.db.insert("settings", {
+      key: "main", ageing: { minAgeDays: 90, windowDays: 30, maxSales: 0 },
+      replenish: { windowDays: 30, coverageDays: 21, budgetSen: 2_000_000 },
+      lowStockThreshold: 2, demoMode: false, seededAt: Date.now(),
+    });
     return null;
   },
 });

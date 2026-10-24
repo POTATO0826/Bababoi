@@ -1,29 +1,29 @@
+import { useClerk } from "@clerk/react";
+import { LogOutIcon, UsersIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { WarehouseIcon } from "@/components/common";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { convex } from "@/convex";
-import type { Role } from "@/domain/types";
 import { cn } from "@/lib/utils";
-import { PEOPLE, setRole, useWare } from "@/store";
-
-const ROLES: [Role, string][] = [
-  ["owner", "Owner"],
-  ["sales", "Sales"],
-  ["warehouse", "Warehouse"],
-];
+import { useWare } from "@/store";
+import { StaffDialog } from "./staff-dialog";
 
 function useLive() {
-  const [live, setLive] = useState(true);
+  const [live, setLive] = useState(false);
   useEffect(() => {
-    const t = setInterval(() => setLive(convex.connectionState().isWebSocketConnected), 2000);
+    const check = () => setLive(convex.connectionState().isWebSocketConnected);
+    check();
+    const t = setInterval(check, 2000);
     return () => clearInterval(t);
   }, []);
   return live;
 }
 
 export function Header() {
-  const role = useWare((s) => s.role);
+  const staff = useWare((s) => s.staff);
   const live = useLive();
+  const { signOut } = useClerk();
+  const [staffOpen, setStaffOpen] = useState(false);
 
   return (
     <header className="flex items-center gap-3 border-b border-border bg-panel px-4">
@@ -31,27 +31,19 @@ export function Header() {
         <WarehouseIcon className="text-brand" />
         <span>WareOrb</span>
       </div>
-
-      <div className="ml-auto flex flex-none items-center gap-2.5 whitespace-nowrap">
-        <span className="inline-flex h-7 items-center gap-[7px] rounded-full border border-border px-2.5 text-xs text-muted-foreground">
+      <div className="ml-auto flex min-w-0 items-center gap-2.5">
+        <span className="hidden h-7 items-center gap-[7px] rounded-full border border-border px-2.5 text-xs text-muted-foreground sm:inline-flex">
           <span className={cn("size-[7px] rounded-full", live ? "animate-blink bg-ok" : "bg-warn")} />
           {live ? "Live" : "Offline"}
         </span>
-        <Select value={role} onValueChange={(v) => setRole(v as Role)}>
-          <SelectTrigger size="sm" className="w-[176px]" aria-label="Acting as">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent align="end">
-            <SelectGroup>
-              {ROLES.map(([k, label]) => (
-                <SelectItem key={k} value={k}>
-                  {PEOPLE[k]} · {label}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+        {staff?.role === "owner" && <Button variant="quiet" size="sm" onClick={() => setStaffOpen(true)} aria-label="Manage staff"><UsersIcon /> <span className="hidden sm:inline">Staff</span></Button>}
+        <span className="min-w-0 text-right text-xs leading-tight">
+          <strong className="block max-w-[130px] truncate font-medium">{staff?.name}</strong>
+          <span className="block capitalize text-muted-foreground">{staff?.role}</span>
+        </span>
+        <Button variant="quiet" size="icon-sm" onClick={() => void signOut()} aria-label="Sign out" title="Sign out"><LogOutIcon /></Button>
       </div>
+      {staff?.role === "owner" && <StaffDialog open={staffOpen} onOpenChange={setStaffOpen} />}
     </header>
   );
 }

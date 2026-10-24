@@ -14,6 +14,9 @@ const app = defineApp({
     FISH_API_KEY: v.optional(v.string()),
     FISH_VOICE_ID: v.optional(v.string()),
     FISH_TTS_MODEL: v.optional(v.string()),
+    CLERK_JWT_ISSUER_DOMAIN: v.optional(v.string()),
+    CLERK_SECRET_KEY: v.optional(v.string()),
+    WAREORB_ALLOW_DEMO_SEED: v.optional(v.string()),
   },
 });
 app.use(rateLimiter);

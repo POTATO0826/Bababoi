@@ -40,6 +40,9 @@ describe("costs (§5.3)", () => {
     totalSen: 28_000,
     expiresAt: NOW + DAY,
     unloading: "included",
+    reference: "Carrier reply Q1",
+    terms: "Includes transport and unloading; no other charges",
+    verifiedAt: NOW,
     ...over,
   });
 
@@ -75,6 +78,8 @@ describe("costs (§5.3)", () => {
       q({ _id: "c", totalSen: 30_000, expiresAt: NOW - 1 }),
       q({ _id: "d", totalSen: 10_000, source: "demo_fallback" }),
       q({ _id: "e", totalSen: 5_000, dealVersion: 1 }),
+      q({ _id: "f", totalSen: 1_000, source: "lalamove_sandbox" }),
+      q({ _id: "g", totalSen: 1_000, verifiedAt: undefined }),
     ];
     const r = rankQuotes(quotes, deal, NOW);
     expect(r.ranked.map((x) => x.quote._id)).toEqual(["a"]);
@@ -83,6 +88,8 @@ describe("costs (§5.3)", () => {
       c: "Expired",
       d: "Saved demo",
       e: "Old version",
+      f: "Sandbox only",
+      g: "Carrier confirmation needed",
     });
   });
 });

@@ -1,6 +1,8 @@
 import { useAction, useMutation, useQuery } from "convex/react";
 import { CheckIcon, ExternalLinkIcon, MapPinIcon, SendIcon, TruckIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { ConvexError } from "convex/values";
+import { toast } from "sonner";
 import { api } from "@convex/_generated/api";
 import type { Doc, Id } from "@convex/_generated/dataModel";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +14,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { run } from "@/convex";
+import { errorText, run } from "@/convex";
 import { comparable, netRecovery, quoteState, rankQuotes } from "@/domain/costs";
 import { missingFields } from "@/domain/deal";
 import { fmtRM, sen } from "@/domain/money";
@@ -20,13 +22,16 @@ import { BUYER_PLACES, mapsLink, WAREHOUSE } from "@/domain/places";
 import { planPick, slotCode } from "@/domain/stock";
 import { fit, piecesFor, type VehicleSpec } from "@/domain/vehicle";
 import { cn } from "@/lib/utils";
-import { actorNow, PEOPLE, useWare } from "@/store";
+import { actorNow, useWare } from "@/store";
 import { DEAL_STATUS, useNow } from "@/workflow";
 import { DetailShell, Section } from "./detail-shell";
 
 type DealDoc = Doc<"deals">;
 type QuoteDoc = Doc<"quotes">;
 type Service = VehicleSpec & { specialRequests: string[] };
+type DealIntent = { version: number; stateVersion: number };
+const captureIntent = (deal: DealDoc): DealIntent => ({ version: deal.version, stateVersion: deal.stateVersion ?? 0 });
+const intentChanged = (intent: DealIntent, deal: DealDoc) => intent.version !== deal.version || intent.stateVersion !== (deal.stateVersion ?? 0);
 
 const SOURCE: Record<QuoteDoc["source"], { label: string; variant: "brand" | "tag" | "warn" }> = {
   lalamove_sandbox: { label: "Lalamove sandbox", variant: "brand" },
@@ -35,7 +40,7 @@ const SOURCE: Record<QuoteDoc["source"], { label: string; variant: "brand" | "ta
 };
 
 export function DealDetail({ id }: { id: string }) {
-  const deal = useWare((s) => s.ledger?.deals.find((d) => d._id === id));
+  const deal = useQuery(api.deals.get, { dealId: id as Id<"deals"> });
   const ledger = useWare((s) => s.ledger);
   const quotes = useQuery(api.quotes.forDeal, deal ? { dealId: deal._id } : "skip") ?? [];
   if (!deal || !ledger) return null;
@@ -52,14 +57,14 @@ export function DealDetail({ id }: { id: string }) {
           <Badge variant="tag" className="font-mono">
             v{deal.version}
           </Badge>
-          {deal.booking && <Badge variant="tag">Simulated booking</Badge>}
+          {deal.booking && <Badge variant={deal.booking.simulated ? "warn" : "ok"}>{deal.booking.simulated ? "Simulated booking" : "Carrier confirmed"}</Badge>}
         </>
       }
     >
-      <BuyerSection deal={deal} />
+      <BuyerSection key={deal._id} deal={deal} />
       {deal.buyer && <QuotesSection deal={deal} quotes={quotes} packages={sku?.packages ?? []} />}
       {(deal.status === "pending_approval" || deal.decision) && <DecisionSection deal={deal} quotes={quotes} />}
-      {(deal.status === "approved" || deal.status === "collected") && <CollectSection deal={deal} />}
+      {(deal.status === "approved" || deal.status === "collected") && <CollectSection key={deal._id} deal={deal} />}
       <History entity={`deal:${deal._id}`} />
       <CloseDeal deal={deal} />
     </DetailShell>
@@ -70,7 +75,7 @@ export function DealDetail({ id }: { id: string }) {
 
 function BuyerSection({ deal }: { deal: DealDoc }) {
   const role = useWare((s) => s.role);
-  const editable = role === "sales" && ["finding_buyer", "offer_ready", "pending_approval", "rejected"].includes(deal.status);
+  const editable = (role === "sales" || role === "owner") && ["finding_buyer", "offer_ready", "pending_approval", "rejected"].includes(deal.status);
   const [editing, setEditing] = useState(!deal.buyer && editable);
   const missing = missingFields(deal);
   const confirm = useMutation(api.deals.confirmDestination);
@@ -113,7 +118,7 @@ function BuyerSection({ deal }: { deal: DealDoc }) {
           {deal.packingSen > 0 && <Line k="Packing" v={fmtRM(deal.packingSen)} />}
         </div>
       ) : (
-        <span className="text-[13px] text-muted-foreground">{PEOPLE.sales} is finding a buyer · guide {fmtRM(deal.brief.guideSen)} / unit</span>
+        <span className="text-[13px] text-muted-foreground">Sales is finding a buyer · guide {fmtRM(deal.brief.guideSen)} / unit</span>
       )}
       {deal.destination && !deal.destination.confirmedBy && editable && (
         <Button variant="outline" size="sm" onClick={() => void run(confirm({ actor: actorNow(), dealId: deal._id, expectedVersion: deal.version }), "Location confirmed")}>
@@ -149,7 +154,7 @@ function BuyerForm({ deal, onDone }: { deal: DealDoc; onDone: () => void }) {
   const [name, setName] = useState(deal.buyer?.name ?? "");
   const [qty, setQty] = useState(String(deal.qty));
   const [price, setPrice] = useState(String(deal.priceSen / 100));
-  const [place, setPlace] = useState(deal.destination ? (presetIndex >= 0 ? String(presetIndex) : "custom") : "0");
+  const [place, setPlace] = useState(deal.destination ? (presetIndex >= 0 ? String(presetIndex) : "custom") : "custom");
   const [lat, setLat] = useState(String(deal.destination?.lat ?? ""));
   const [lng, setLng] = useState(String(deal.destination?.lng ?? ""));
   const [address, setAddress] = useState(deal.destination?.address ?? "");
@@ -160,8 +165,11 @@ function BuyerForm({ deal, onDone }: { deal: DealDoc; onDone: () => void }) {
   const [payer, setPayer] = useState(deal.freightPayer);
   const [packing, setPacking] = useState(String(deal.packingSen / 100));
   const [busy, setBusy] = useState(false);
+  const [baseVersion] = useState(deal.version);
+  const stale = deal.version !== baseVersion;
 
   const save = async () => {
+    if (stale) return;
     const preset = place === "custom" ? null : BUYER_PLACES[Number(place)];
     const destination = preset
       ? { label: preset.label, address: preset.address, lat: preset.lat, lng: preset.lng }
@@ -171,7 +179,7 @@ function BuyerForm({ deal, onDone }: { deal: DealDoc; onDone: () => void }) {
       update({
         actor: actorNow(),
         dealId: deal._id,
-        expectedVersion: deal.version,
+        expectedVersion: baseVersion,
         patch: {
           buyer: { name: name.trim() },
           qty: Math.round(Number(qty)),
@@ -186,12 +194,13 @@ function BuyerForm({ deal, onDone }: { deal: DealDoc; onDone: () => void }) {
       }),
     );
     setBusy(false);
-    if (ok != null) onDone();
+    if (ok !== undefined) onDone();
   };
 
   return (
     <Section label="Buyer">
       <FieldGroup className="gap-3">
+        {stale && <div role="alert" className="text-[12px] text-warn">This deal changed. Your draft is still shown. Cancel and reopen the buyer form to load the latest details.</div>}
         <Field>
           <FieldLabel htmlFor="d-name">Buyer</FieldLabel>
           <Input id="d-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" />
@@ -269,11 +278,11 @@ function BuyerForm({ deal, onDone }: { deal: DealDoc; onDone: () => void }) {
           <Input id="d-pack" type="number" min={0} value={packing} onChange={(e) => setPacking(e.target.value)} className="font-mono" />
         </Field>
         <div className="flex gap-2">
-          <Button className="flex-1" disabled={busy || !name.trim()} onClick={save}>
+          <Button className="flex-1" disabled={busy || stale || !name.trim()} onClick={save}>
             {busy && <Spinner data-icon="inline-start" />}
             Save
           </Button>
-          {deal.buyer && (
+          {(deal.buyer || stale) && (
             <Button variant="outline" onClick={onDone}>
               Cancel
             </Button>
@@ -332,13 +341,15 @@ function QuotesSection({ deal, quotes, packages }: { deal: DealDoc; quotes: Quot
   const request = useMutation(api.quotes.request);
   const demo = useMutation(api.quotes.addDemoReplies);
   const submit = useMutation(api.deals.submit);
+  const confirmFit = useMutation(api.deals.confirmFit);
   const demoMode = useWare((s) => s.ledger?.settings.demoMode);
   const [picked, setPicked] = useState<string[]>([]);
   const [chosen, setChosen] = useState<string | null>(null);
   const [manual, setManual] = useState(false);
   const missing = missingFields(deal);
   const canQuote = (role === "sales" || role === "owner") && missing.length === 0 && ["offer_ready", "pending_approval", "rejected"].includes(deal.status);
-  const canSubmit = role === "sales" && ["offer_ready", "rejected"].includes(deal.status);
+  const canSubmit = (role === "sales" || role === "owner") && ["offer_ready", "rejected"].includes(deal.status);
+  useEffect(() => { setChosen(null); setPicked([]); }, [deal._id, deal.version]);
 
   const pieces = useMemo(() => piecesFor(packages, deal.qty), [packages, deal.qty]);
   const vehicles = (services?.services ?? []).map((v) => ({ v, f: fit(pieces, v) }));
@@ -398,7 +409,7 @@ function QuotesSection({ deal, quotes, packages }: { deal: DealDoc; quotes: Quot
               }}
             >
               <TruckIcon data-icon="inline-start" />
-              Get Lalamove quotes
+              Get sandbox estimates
             </Button>
             <Button size="sm" variant="outline" onClick={() => setManual(!manual)}>
               Add quote
@@ -418,6 +429,7 @@ function QuotesSection({ deal, quotes, packages }: { deal: DealDoc; quotes: Quot
         </div>
       )}
 
+      {canQuote && <span className="text-[11.5px] text-muted-foreground">Lalamove estimates are sandbox results. Record the carrier’s verified reply to request approval.</span>}
       {current.length > 0 && (
         <div className="flex flex-col gap-1.5">
           {[...ranked.map((r) => ({ quote: r.quote, reason: null as string | null })), ...other].map(({ quote: q, reason }) => (
@@ -439,18 +451,19 @@ function QuotesSection({ deal, quotes, packages }: { deal: DealDoc; quotes: Quot
         <span className="text-[11.5px] text-faint">{quotes.filter((q) => q.dealVersion !== deal.version).length} quotes from older versions hidden</span>
       )}
 
+      {["offer_ready", "pending_approval", "rejected"].includes(deal.status) && <label className="flex items-center gap-2 text-[12px]"><Checkbox checked={!!deal.fitConfirmedBy} disabled={!!deal.fitConfirmedBy} onCheckedChange={(value) => { if (value === true) void run(confirmFit({ actor: actorNow(), dealId: deal._id, expectedVersion: deal.version }), "Cargo and vehicle fit confirmed"); }} />{deal.fitConfirmedBy ? `Cargo fit checked by ${deal.fitConfirmedBy}` : "I checked the actual cargo and vehicle fit"}</label>}
       {canSubmit && (
         <Button
-          disabled={!chosen && !best}
+          disabled={(!chosen && !best) || !deal.fitConfirmedBy || missing.length > 0 || (deal.collectAt ?? 0) <= now}
           onClick={() =>
             void run(
               submit({ actor: actorNow(), dealId: deal._id, expectedVersion: deal.version, quoteId: (chosen ?? best) as Id<"quotes"> }),
-              `Sent to ${PEOPLE.owner}`,
+              "Sent for owner approval",
             )
           }
         >
           <SendIcon data-icon="inline-start" />
-          Send to {PEOPLE.owner}
+          Send for approval
         </Button>
       )}
     </Section>
@@ -536,10 +549,12 @@ function QuoteRow({
           )}
         </span>
       </div>
+      {q.reference && <span className="text-[11.5px] text-muted-foreground">Reference: {q.reference}</span>}
+      {q.terms && <span className="text-[11.5px] text-muted-foreground">{q.terms}</span>}
       {needsUnloading && (role === "sales" || role === "owner") && (
         <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
           <span className="flex-1 text-[11.5px] text-warn">Unloading?</span>
-          <Button size="xs" variant="outline" onClick={() => void run(setUnloading({ actor: actorNow(), quoteId: q._id, unloading: "included" }))}>
+          <Button size="xs" variant="outline" onClick={() => void run(setUnloading({ actor: actorNow(), quoteId: q._id, expectedVersion: deal.version, unloading: "included" }))}>
             Included
           </Button>
           <Input value={extra} onChange={(e) => setExtra(e.target.value)} placeholder="RM" className="h-6 w-14 px-1.5 font-mono text-xs" />
@@ -547,7 +562,7 @@ function QuoteRow({
             size="xs"
             variant="outline"
             disabled={!(Number(extra) >= 0) || extra === ""}
-            onClick={() => void run(setUnloading({ actor: actorNow(), quoteId: q._id, unloading: "excluded", unloadingSen: sen(Number(extra)) }))}
+            onClick={() => void run(setUnloading({ actor: actorNow(), quoteId: q._id, expectedVersion: deal.version, unloading: "excluded", unloadingSen: sen(Number(extra)) }))}
           >
             Extra
           </Button>
@@ -559,48 +574,39 @@ function QuoteRow({
 
 function ManualQuote({ deal, onDone }: { deal: DealDoc; onDone: () => void }) {
   const add = useMutation(api.quotes.addManual);
+  const [intent] = useState(() => captureIntent(deal));
   const [carrier, setCarrier] = useState("");
   const [service, setService] = useState("");
   const [total, setTotal] = useState("");
-  const [unloading, setUnloading] = useState<"included" | "excluded" | "unknown">("included");
+  const [unloading, setUnloading] = useState<"included" | "excluded" | "unknown">("unknown");
   const [extra, setExtra] = useState("");
-  return (
-    <FieldGroup className="gap-2.5 rounded-md border border-border p-2.5">
-      <div className="grid grid-cols-2 gap-2">
-        <Input value={carrier} onChange={(e) => setCarrier(e.target.value)} placeholder="Carrier" />
-        <Input value={service} onChange={(e) => setService(e.target.value)} placeholder="Vehicle" />
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <Input value={total} onChange={(e) => setTotal(e.target.value)} placeholder="Total RM" className="font-mono" type="number" />
-        {unloading === "excluded" && (
-          <Input value={extra} onChange={(e) => setExtra(e.target.value)} placeholder="Unloading RM" className="font-mono" type="number" />
-        )}
-      </div>
-      <Segment value={unloading} onChange={setUnloading} items={[["included", "Incl."], ["excluded", "Extra"], ["unknown", "Unknown"]]} />
-      <Button
-        size="sm"
-        disabled={!carrier.trim() || !(Number(total) > 0)}
-        onClick={async () => {
-          const ok = await run(
-            add({
-              actor: actorNow(),
-              dealId: deal._id,
-              expectedVersion: deal.version,
-              carrier,
-              service,
-              totalSen: sen(Number(total)),
-              unloading,
-              ...(unloading === "excluded" && extra !== "" ? { unloadingSen: sen(Number(extra)) } : {}),
-              validHours: 24,
-            }),
-          );
-          if (ok !== undefined) onDone();
-        }}
-      >
-        Add
-      </Button>
-    </FieldGroup>
-  );
+  const [reference, setReference] = useState("");
+  const [terms, setTerms] = useState("");
+  const [validHours, setValidHours] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const stale = intentChanged(intent, deal);
+  const valid = carrier.trim() && service.trim() && reference.trim() && terms.trim() && confirmed && Number(total) > 0
+    && Number.isFinite(Number(total)) && Number(validHours) > 0 && Number(validHours) <= 720
+    && (unloading !== "excluded" || (extra !== "" && Number.isFinite(Number(extra)) && Number(extra) >= 0));
+  return <FieldGroup className="gap-2.5 rounded-md border border-border p-2.5">
+    {stale && <span role="alert" className="text-[12px] text-warn">The deal changed. Close and reopen this quote form after reviewing the latest details.</span>}
+    <div className="grid grid-cols-2 gap-2"><Input value={carrier} onChange={(e) => setCarrier(e.target.value)} placeholder="Carrier" aria-label="Carrier" /><Input value={service} onChange={(e) => setService(e.target.value)} placeholder="Confirmed vehicle" aria-label="Confirmed vehicle" /></div>
+    <div className="grid grid-cols-2 gap-2"><Input value={total} onChange={(e) => setTotal(e.target.value)} placeholder="Total RM" aria-label="Carrier total RM" className="font-mono" type="number" min="0.01" step="0.01" /><Input value={validHours} onChange={(e) => setValidHours(e.target.value)} placeholder="Valid for hours" aria-label="Quote validity hours" type="number" min="0.1" max="720" step="0.1" /></div>
+    <Segment value={unloading} onChange={setUnloading} items={[["included", "Unloading included"], ["excluded", "Extra"], ["unknown", "Unknown"]]} />
+    {unloading === "excluded" && <Input value={extra} onChange={(e) => setExtra(e.target.value)} placeholder="Confirmed unloading RM" aria-label="Confirmed unloading RM" className="font-mono" type="number" min="0" step="0.01" />}
+    <Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Carrier quote reference / reply" aria-label="Carrier quote reference" />
+    <Textarea value={terms} onChange={(e) => setTerms(e.target.value)} placeholder="Confirmed full terms, surcharges and exclusions" aria-label="Full carrier terms" className="text-[12.5px]" />
+    <label className="flex items-center gap-2 text-[12px]"><Checkbox checked={confirmed} onCheckedChange={(value) => setConfirmed(value === true)} />I verified this reply, price, vehicle and terms with the carrier</label>
+    <div className="flex gap-2"><Button size="sm" disabled={!valid || busy || stale} onClick={async () => {
+      if (stale) return;
+      setBusy(true);
+      try {
+        const ok = await run(add({ actor: actorNow(), dealId: deal._id, expectedVersion: intent.version, carrier, service, totalSen: sen(Number(total)), unloading, ...(unloading === "excluded" ? { unloadingSen: sen(Number(extra)) } : {}), validHours: Number(validHours), reference, terms, confirmed }));
+        if (ok !== undefined) onDone();
+      } finally { setBusy(false); }
+    }}>{busy ? "Saving…" : "Record verified quote"}</Button><Button size="sm" variant="outline" disabled={busy} onClick={onDone}>Cancel</Button></div>
+  </FieldGroup>;
 }
 
 // ── Owner decision ───────────────────────────────────────────────────────
@@ -714,48 +720,140 @@ function DecisionSection({ deal, quotes }: { deal: DealDoc; quotes: QuoteDoc[] }
 
 // ── Warehouse collection ─────────────────────────────────────────────────
 
+type CollectionAttempt = {
+  requestId: string;
+  expectedVersion: number;
+  lines: { slot: string; qty: number }[];
+  collectedAt: number;
+  confirmed: true;
+};
+
+function pendingCollection(key: string): CollectionAttempt | null {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(key) ?? "null") as CollectionAttempt | null;
+    if (value && typeof value.requestId === "string" && Number.isInteger(value.expectedVersion) && Array.isArray(value.lines) && Number.isFinite(value.collectedAt) && value.confirmed === true) return value;
+  } catch { /* The current page can still retain a retry if storage is unavailable. */ }
+  return null;
+}
+
 function CollectSection({ deal }: { deal: DealDoc }) {
   const role = useWare((s) => s.role);
   const res = useWare((s) => s.ledger?.reservations.find((r) => r._id === deal.reservationId));
   const confirm = useMutation(api.deals.confirmCollection);
-  const [sure, setSure] = useState(false);
+  const storageKey = `wareorb-collection:${deal._id}`;
+  const [pending, setPending] = useState<CollectionAttempt | null>(() => pendingCollection(storageKey));
+  const [counts, setCounts] = useState<Record<string, string>>({});
+  const [when, setWhen] = useState(() => toLocalInput(Date.now()));
+  const [checked, setChecked] = useState(false);
+  const [baseVersion, setBaseVersion] = useState(deal.version);
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   const pick = res?.pick ?? [];
+  const stale = baseVersion !== deal.version;
+  const allowed = role === "warehouse" || role === "owner";
+  const booked = deal.booking && !deal.booking.simulated;
+  const actual = pick.map((p) => ({ slot: p.slot, qty: Number(counts[p.slot] ?? "0") })).filter((p) => p.qty > 0);
+  const qty = actual.reduce((sum, p) => sum + p.qty, 0);
+  const valid = actual.length > 0 && pick.every((p) => { const n = Number(counts[p.slot] ?? "0"); return Number.isSafeInteger(n) && n >= 0 && n <= p.qty; }) && Number.isFinite(new Date(when).getTime());
 
-  return (
-    <Section label="Collection" aside={deal.booking && <Badge variant="tag">{deal.booking.ref}</Badge>}>
-      {deal.status === "approved" ? (
-        <>
-          <div className="flex flex-wrap gap-1.5">
-            {pick.map((p) => (
-              <Badge key={p.slot} variant="reserved" className="font-mono">
-                {slotCode(p.slot)} ×{p.qty}
-              </Badge>
-            ))}
-          </div>
-          {role === "warehouse" &&
-            (sure ? (
-              <div className="flex gap-2">
-                <Button className="flex-1" onClick={() => void run(confirm({ actor: actorNow(), dealId: deal._id }), "Collected · stock updated")}>
-                  Confirm {deal.qty} left the warehouse
-                </Button>
-                <Button variant="outline" onClick={() => setSure(false)}>
-                  Back
-                </Button>
-              </div>
-            ) : (
-              <Button onClick={() => setSure(true)}>
-                <TruckIcon data-icon="inline-start" />
-                Goods collected
-              </Button>
-            ))}
-        </>
-      ) : (
-        <span className="text-[12.5px] text-muted-foreground">
-          {deal.qty} collected {deal.collectedAt ? new Date(deal.collectedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : ""} · from {WAREHOUSE.label}
-        </span>
-      )}
-    </Section>
-  );
+  const reload = () => { setCounts({}); setWhen(toLocalInput(Date.now())); setChecked(false); setBaseVersion(deal.version); setDirty(false); setFailure(null); };
+  useEffect(() => { if (!dirty && !pending && !busy) setBaseVersion((version) => Math.max(version, deal.version)); }, [deal.version, dirty, pending, busy]);
+  const send = async () => {
+    const attempt = pending ?? { requestId: crypto.randomUUID(), expectedVersion: baseVersion, lines: actual, collectedAt: new Date(when).getTime(), confirmed: true as const };
+    setPending(attempt);
+    try { sessionStorage.setItem(storageKey, JSON.stringify(attempt)); } catch { /* Retry key remains in memory. */ }
+    setBusy(true);
+    setFailure(null);
+    try {
+      const result = await confirm({ actor: actorNow(), dealId: deal._id, ...attempt });
+      try { sessionStorage.removeItem(storageKey); } catch { /* Storage is optional. */ }
+      setPending(null);
+      setCounts({});
+      setChecked(false);
+      setDirty(false);
+      setBaseVersion(Math.max(deal.version, attempt.expectedVersion + 1));
+      toast.success(`${result.qty} collected · stock updated${result.repeated ? " (already recorded)" : ""}`);
+    } catch (e) {
+      setFailure(errorText(e));
+      if (e instanceof ConvexError) {
+        // A server refusal is atomic. A connection failure keeps the identical request for safe retry.
+        try { sessionStorage.removeItem(storageKey); } catch { /* Storage is optional. */ }
+        setPending(null);
+      }
+    } finally { setBusy(false); }
+  };
+
+  return <Section label="Collection" aside={deal.booking && <Badge variant={booked ? "ok" : "warn"}>{deal.booking.ref}</Badge>}>
+    {deal.status === "approved" && <>
+      <CarrierArrangement deal={deal} />
+      {(deal.collectedQty ?? 0) > 0 && <span className="text-[12px] text-muted-foreground">{deal.collectedQty} units already collected · {pick.reduce((sum, p) => sum + p.qty, 0)} remain reserved</span>}
+      <div className="flex flex-wrap gap-1.5">{pick.map((p) => <Badge key={p.slot} variant="reserved" className="font-mono">{slotCode(p.slot)} ×{p.qty} reserved</Badge>)}</div>
+      {allowed && !booked && <span className="text-[12px] text-warn">Record the actual carrier arrangement before confirming goods left the warehouse.</span>}
+      {allowed && booked && !pending && <>
+        {stale && dirty && <div role="alert" className="text-[12px] text-warn">This allocation changed. Your count is still shown. Reload the remaining allocation before entering a new collection.<Button size="xs" variant="outline" onClick={reload}>Reload allocation</Button></div>}
+        <span className="text-[12px] text-muted-foreground">Enter only the units that actually left each bay. Leave the rest at zero.</span>
+        {pick.map((p) => <label key={p.slot} className="flex items-center justify-between gap-2 text-[12px]"><span>{slotCode(p.slot)} · maximum {p.qty}</span><Input type="number" min="0" max={p.qty} step="1" className="h-8 w-24 font-mono" value={counts[p.slot] ?? "0"} disabled={busy || stale} aria-label={`Actual units collected from ${slotCode(p.slot)}`} onChange={(e) => { setCounts((all) => ({ ...all, [p.slot]: e.target.value })); setDirty(true); setChecked(false); }} /></label>)}
+        <label className="text-[12px]">Actual collection time<Input type="datetime-local" value={when} disabled={busy || stale} onChange={(e) => { setWhen(e.target.value); setDirty(true); setChecked(false); }} /></label>
+        <label className="flex items-center gap-2 text-[12px]"><Checkbox checked={checked} disabled={busy || stale} onCheckedChange={(value) => setChecked(value === true)} />I counted and confirmed these {qty} units left the warehouse</label>
+        <Button disabled={!valid || !checked || busy || stale} onClick={() => void send()}><TruckIcon data-icon="inline-start" />Record {qty} collected</Button>
+      </>}
+      <ReviseDeal deal={deal} />
+    </>}
+    {deal.status === "collected" && <span className="text-[12.5px] text-muted-foreground">{deal.collectedQty ?? deal.qty} collected {deal.collectedAt ? new Date(deal.collectedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : ""} · from {WAREHOUSE.label}</span>}
+    {allowed && pending && <div className="flex flex-col gap-2 rounded-md border border-warn/40 p-2.5"><span className="text-[12px]">A count of {pending.lines.reduce((sum, p) => sum + p.qty, 0)} units is awaiting confirmation. Retry the same count to check its result safely.</span><Button disabled={busy} onClick={() => void send()}>{busy ? "Checking…" : "Retry saved collection"}</Button></div>}
+    {failure && <span role="alert" className="text-[12px] text-dispatch">{failure}</span>}
+  </Section>;
+}
+
+function CarrierArrangement({ deal }: { deal: DealDoc }) {
+  const role = useWare((s) => s.role);
+  const record = useMutation(api.deals.recordBooking);
+  const [reference, setReference] = useState("");
+  const [checked, setChecked] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [intent, setIntent] = useState<DealIntent | null>(null);
+  const stale = intent !== null && intentChanged(intent, deal);
+  const reset = () => { setReference(""); setChecked(false); setIntent(null); };
+  if (deal.booking && !deal.booking.simulated) return <span className="text-[12px] text-muted-foreground">{deal.booking.carrier} confirmed · {deal.booking.ref}{deal.booking.recordedBy ? ` · recorded by ${deal.booking.recordedBy.name}` : ""}</span>;
+  if (role !== "owner" && role !== "sales") return null;
+  return <div className="flex flex-col gap-2 rounded-md border border-border p-2.5">
+    <span className="text-[12px] text-muted-foreground">Arrange the approved vehicle with the carrier, then record its actual reference here.</span>
+    {stale && <div role="alert" className="flex flex-col gap-2 text-[12px] text-warn"><span>The approved deal changed while you entered this reference. Review the latest details and reset this form before confirming the carrier arrangement.</span><Button size="xs" variant="outline" disabled={busy} onClick={reset}>Reset carrier form</Button></div>}
+    <Input value={reference} disabled={busy || stale} onChange={(e) => { if (!intent) setIntent(captureIntent(deal)); setReference(e.target.value); setChecked(false); }} placeholder="Confirmed carrier arrangement reference" aria-label="Confirmed carrier arrangement reference" maxLength={200} />
+    <label className="flex items-center gap-2 text-[12px]"><Checkbox checked={checked} disabled={busy || stale} onCheckedChange={(value) => { if (!intent) setIntent(captureIntent(deal)); setChecked(value === true); }} />The carrier confirmed this arrangement outside WareOrb</label>
+    <Button size="sm" disabled={!checked || !reference.trim() || busy || stale || !intent} onClick={async () => {
+      if (!intent || stale) return;
+      setBusy(true);
+      try { await run(record({ actor: actorNow(), dealId: deal._id, expectedVersion: intent.version, expectedStateVersion: intent.stateVersion, reference, confirmed: checked }), "Carrier arrangement recorded"); }
+      finally { setBusy(false); }
+    }}>Record carrier reference</Button>
+  </div>;
+}
+
+function ReviseDeal({ deal }: { deal: DealDoc }) {
+  const role = useWare((s) => s.role);
+  const revise = useMutation(api.deals.revise);
+  const [intent, setIntent] = useState<DealIntent | null>(null);
+  const [reason, setReason] = useState("");
+  const [checked, setChecked] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const stale = intent !== null && intentChanged(intent, deal);
+  const reset = () => { setReason(""); setChecked(false); setIntent(captureIntent(deal)); };
+  if ((role !== "owner" && role !== "sales") || (deal.collectedQty ?? 0) > 0) return null;
+  if (!intent) return <Button variant="quiet" size="sm" className="self-start" onClick={reset}>Revise approved deal</Button>;
+  return <div className="flex flex-col gap-2">
+    <span className="text-[12px] text-muted-foreground">Revision releases reserved stock and requires a new quote and approval.</span>
+    {stale && <div role="alert" className="flex flex-col gap-2 text-[12px] text-warn"><span>The deal changed after you opened this revision. Review the latest details and reset the form before releasing its stock hold.</span><Button size="xs" variant="outline" disabled={busy} onClick={reset}>Reset revision form</Button></div>}
+    <Input value={reason} disabled={busy || stale} onChange={(e) => setReason(e.target.value)} placeholder="Reason for revision" />
+    <label className="flex items-center gap-2 text-[12px]"><Checkbox checked={checked} disabled={busy || stale} onCheckedChange={(value) => setChecked(value === true)} />I checked any carrier cancellation outside WareOrb</label>
+    <div className="flex gap-2"><Button size="sm" variant="outline" disabled={!checked || !reason.trim() || busy || stale} onClick={async () => {
+      if (stale) return;
+      setBusy(true);
+      try { await run(revise({ actor: actorNow(), dealId: deal._id, expectedVersion: intent.version, expectedStateVersion: intent.stateVersion, reason }), "Deal reopened · stock hold released"); }
+      finally { setBusy(false); }
+    }}>Release hold and revise</Button><Button size="sm" variant="quiet" disabled={busy} onClick={() => { setIntent(null); setReason(""); setChecked(false); }}>Cancel</Button></div>
+  </div>;
 }
 
 // ── History / close ──────────────────────────────────────────────────────
@@ -783,19 +881,20 @@ export function History({ entity }: { entity: string }) {
 function CloseDeal({ deal }: { deal: DealDoc }) {
   const role = useWare((s) => s.role);
   const close = useMutation(api.deals.close);
-  const [open, setOpen] = useState(false);
+  const [intent, setIntent] = useState<DealIntent | null>(null);
   const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const stale = intent !== null && intentChanged(intent, deal);
+  const reset = () => { setReason(""); setIntent(captureIntent(deal)); };
   if (!(role === "owner" || role === "sales") || deal.status === "collected" || deal.status === "closed") return null;
-  return open ? (
-    <div className="flex gap-2">
-      <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why close?" className="h-8" />
-      <Button size="sm" variant="outline" disabled={!reason.trim()} onClick={() => void run(close({ actor: actorNow(), dealId: deal._id, reason }), "Deal closed")}>
-        Close
-      </Button>
-    </div>
-  ) : (
-    <Button variant="quiet" size="sm" className="self-start text-muted-foreground" onClick={() => setOpen(true)}>
-      Close deal
-    </Button>
-  );
+  if (!intent) return <Button variant="quiet" size="sm" className="self-start text-muted-foreground" onClick={reset}>Close deal</Button>;
+  return <div className="flex flex-col gap-2">
+    {stale && <div role="alert" className="flex flex-col gap-2 text-[12px] text-warn"><span>The deal changed after you opened this form. Your reason is still shown. Review the latest details and reset the form before closing the deal.</span><Button size="xs" variant="outline" disabled={busy} onClick={reset}>Reset close form</Button></div>}
+    <div className="flex gap-2"><Input value={reason} disabled={busy || stale} onChange={(e) => setReason(e.target.value)} placeholder="Why close?" className="h-8" /><Button size="sm" variant="outline" disabled={!reason.trim() || busy || stale} onClick={async () => {
+      if (stale) return;
+      setBusy(true);
+      try { await run(close({ actor: actorNow(), dealId: deal._id, expectedVersion: intent.version, expectedStateVersion: intent.stateVersion, reason }), "Deal closed"); }
+      finally { setBusy(false); }
+    }}>Close</Button><Button size="sm" variant="quiet" disabled={busy} onClick={() => { setIntent(null); setReason(""); }}>Cancel</Button></div>
+  </div>;
 }

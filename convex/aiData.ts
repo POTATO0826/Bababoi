@@ -1,11 +1,17 @@
 // Read helpers and write-backs for the Claude actions in ai.ts (which run in the Node runtime).
 import { v } from "convex/values";
-import { internalMutation, internalQuery } from "./_generated/server";
-import { activeBatches, activeReservations } from "./lib";
+import { internalMutation, internalQuery, type QueryCtx } from "./_generated/server";
+import { activeBatches, activeReservations, fail } from "./lib";
 import { flagBatches } from "../src/domain/ageing";
-import { missingFields } from "../src/domain/deal";
+import { missingFields, OPEN_DEAL } from "../src/domain/deal";
 import { slotCode } from "../src/domain/stock";
 import { DAY } from "../src/domain/types";
+
+async function openDeals(ctx: QueryCtx) {
+  const rows = (await Promise.all(OPEN_DEAL.map(status => ctx.db.query("deals").withIndex("by_status", q => q.eq("status", status)).take(1001)))).flat();
+  if (rows.length > 1000) fail("Too many open deals; close completed work first");
+  return rows;
+}
 
 export const skuForIcon = internalQuery({
   args: { code: v.string() },
@@ -33,7 +39,8 @@ export const searchStock = internalQuery({
   args: { query: v.string() },
   handler: async (ctx, { query }) => {
     const words = query.toLowerCase().split(/[\s,·-]+/).filter((w) => w.length > 1);
-    const skus = await ctx.db.query("skus").take(500);
+    const skus = await ctx.db.query("skus").take(501);
+    if (skus.length > 500) fail("Catalogue needs pagination before stock search can continue");
     const batches = await activeBatches(ctx);
     const res = await activeReservations(ctx);
     const scored = skus
@@ -74,11 +81,13 @@ export const attention = internalQuery({
       ctx.db
         .query("movements")
         .withIndex("by_at", (q) => q.gte("at", now - 95 * DAY))
-        .take(3000),
-      ctx.db.query("skus").take(500),
-      ctx.db.query("deals").take(200),
+        .take(3001),
+      ctx.db.query("skus").take(501),
+      openDeals(ctx),
     ]);
-    const flags = flagBatches({ batches, reservations, movements, rule: settings.ageing, now, historyFrom: settings.seededAt - 90 * DAY });
+    if (movements.length > 3000 || skus.length > 500) fail("History or catalogue needs pagination before ageing analysis can continue");
+    const historyFrom = settings.demoMode ? movements.reduce((start, m) => Math.min(start, m.at), settings.seededAt) : settings.seededAt;
+    const flags = flagBatches({ batches, reservations, movements, rule: settings.ageing, now, historyFrom });
     return flags
       .filter((f) => f.flagged)
       .slice(0, 6)
@@ -102,11 +111,12 @@ export const attention = internalQuery({
 export const work = internalQuery({
   args: { role: v.union(v.literal("owner"), v.literal("sales"), v.literal("warehouse")) },
   handler: async (ctx, { role }) => {
-    const deals = await ctx.db.query("deals").take(200);
+    const deals = await openDeals(ctx);
     const receipts = await ctx.db
       .query("receipts")
       .withIndex("by_status", (q) => q.eq("status", "needs_review"))
-      .take(20);
+      .take(1001);
+    if (receipts.length > 1000) fail("Too many open receipts; finish outstanding reviews first");
     const turn: Record<string, string[]> = {
       owner: ["pending_approval"],
       sales: ["finding_buyer", "offer_ready", "rejected"],
@@ -114,7 +124,7 @@ export const work = internalQuery({
     };
     return {
       deals: deals.filter((d) => turn[role]!.includes(d.status)).map((d) => ({ deal: d.code, sku_code: d.skuCode, status: d.status, buyer: d.buyer?.name ?? null })),
-      receipts_to_verify: role === "warehouse" ? receipts.map((r) => r.docRef ?? r.code) : [],
+      receipts_to_verify: role === "warehouse" || role === "owner" ? receipts.map((r) => r.docRef ?? r.code) : [],
     };
   },
 });
@@ -123,7 +133,7 @@ export const work = internalQuery({
 export const dealByRef = internalQuery({
   args: { ref: v.string() },
   handler: async (ctx, { ref }) => {
-    const deals = await ctx.db.query("deals").order("desc").take(200);
+    const deals = (await openDeals(ctx)).sort((a, b) => b._creationTime - a._creationTime);
     const skus = await ctx.db.query("skus").take(500);
     const r = ref.toLowerCase();
     const open = (d: (typeof deals)[number]) => !["collected", "closed"].includes(d.status);
@@ -136,8 +146,7 @@ export const dealByRef = internalQuery({
           const s = skus.find((x) => x.code === d.skuCode);
           const hay = `${d.code} ${d.skuCode} ${s?.model} ${s?.variant} ${d.buyer?.name ?? ""}`.toLowerCase();
           return r.split(/\s+/).some((w) => w.length > 2 && hay.includes(w));
-        }) ??
-      deals.find(open);
+        });
     if (!byWords) return null;
     const d = byWords;
     const sku = skus.find((x) => x.code === d.skuCode);
@@ -168,7 +177,7 @@ export const dealByRef = internalQuery({
           source: q.note === "Synthetic" ? "synthetic carrier reply" : q.source,
           status: q.status,
           total_rm: q.totalSen != null ? q.totalSen / 100 : null,
-          expires_in_s: q.expiresAt ? Math.round((q.expiresAt - Date.now()) / 1000) : null,
+          expires_at_utc: q.expiresAt ? new Date(q.expiresAt).toISOString() : null,
           unloading: q.unloading,
           error: q.error?.message ?? null,
         })),

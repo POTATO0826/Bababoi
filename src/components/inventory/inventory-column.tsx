@@ -17,6 +17,9 @@ export function InventoryColumn({ wide, className }: { wide: boolean; className?
   const query = useWare((s) => s.query);
   const q = query.trim().toLowerCase();
   const totalUnits = useInventory().skus.reduce((a, s) => a + s.onHand, 0);
+  const ledgerReady = useWare((s) => s.ledgerReady);
+  const catalogueCount = useWare((s) => s.ledger?.skus.length ?? 0);
+  const role = useWare((s) => s.role);
 
   return (
     <aside className={cn("flex min-h-0 flex-col gap-3", className)}>
@@ -55,6 +58,14 @@ export function InventoryColumn({ wide, className }: { wide: boolean; className?
         ) : (
           <>
             <TotalsCard />
+            {ledgerReady && totalUnits === 0 && <section className="rounded-xl border border-brand/35 bg-brand/8 p-4">
+              <h2 className="text-sm font-semibold">{catalogueCount ? "Ready for your first receipt" : "Start your warehouse catalogue"}</h2>
+              <p className="mt-1 text-xs text-muted-foreground">{catalogueCount ? "Count the delivery, confirm its SKU and choose the bays before stock appears here." : "Create a real item, then record and post a counted receipt to place stock on the map."}</p>
+              {role !== "sales" && <div className="mt-3 flex gap-2">
+                <Button size="sm" onClick={() => setWare({ receiveOpen: true })}>Create item</Button>
+                {catalogueCount > 0 && <Button size="sm" variant="outline" onClick={() => setWare({ stage: "receive" })}>Open receiving</Button>}
+              </div>}
+            </section>}
             <NewArrivals />
             <CategoryList wide={wide} />
           </>

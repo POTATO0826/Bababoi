@@ -8,10 +8,15 @@
     "dev": "bun --hot src/index.ts",
     "start": "NODE_ENV=production bun src/index.ts",
     "build": "bun run build.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "typecheck:backend": "tsc -p convex --noEmit",
+    "test": "bun test src/domain src/voice && vitest run",
+    "test:backend": "vitest run",
+    "check": "bun run test && bun run typecheck && bun run typecheck:backend && bun run build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
+    "@clerk/react": "^6.18.1",
     "@convex-dev/rate-limiter": "^0.4.2",
     "@fontsource-variable/geist": "^5.2.5",
     "@fontsource-variable/geist-mono": "^5.2.5",
@@ -36,12 +41,15 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
     "@types/bun": "latest",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.180.0",
+    "convex-test": "^0.0.65",
     "tailwindcss": "^4.1.11",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "vitest": "^5.0.5"
   },
   "module": "src/index.ts"
 }

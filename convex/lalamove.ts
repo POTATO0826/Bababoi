@@ -4,6 +4,7 @@ import { internal } from "./_generated/api";
 import { action, env, internalAction } from "./_generated/server";
 import { headers, mapError, parseQuotation, parseServices, quotationBody } from "../src/domain/lalamove";
 import type { VehicleSpec } from "../src/domain/vehicle";
+import { getActionActor } from "./access";
 
 const BASE = () => env.LALAMOVE_BASE_URL || "https://rest.sandbox.lalamove.com";
 const CITIES_KEY = "lalamove:cities:MY";
@@ -78,6 +79,7 @@ const FIXTURE: Service[] = [
 export const services = action({
   args: {},
   handler: async (ctx): Promise<{ source: "live" | "fixture"; services: Service[] }> => {
+    await getActionActor(ctx, "owner", "sales");
     const cached = await ctx.runQuery(internal.quotes.kvGet, { key: CITIES_KEY });
     if (cached && Date.now() - cached.updatedAt < 86_400_000) {
       return { source: "live", services: JSON.parse(cached.value) as Service[] };

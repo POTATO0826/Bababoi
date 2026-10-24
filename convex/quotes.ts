@@ -4,7 +4,8 @@ import { internal } from "./_generated/api";
 import { internalMutation, internalQuery, mutation, query, type MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { actor, extraStatus } from "./schema";
-import { audit, fail, getSettings, requireRole } from "./lib";
+import { audit, fail, getSettings } from "./lib";
+import { getActor, getViewer } from "./access";
 import { limiter } from "./limits";
 import { missingFields } from "../src/domain/deal";
 import { WAREHOUSE } from "../src/domain/places";
@@ -25,12 +26,14 @@ const initialUnloading = (deal: Doc<"deals">) => (deal.unloading === "requested"
 
 export const forDeal = query({
   args: { dealId: v.id("deals") },
-  handler: async (ctx, { dealId }) =>
-    await ctx.db
+  handler: async (ctx, { dealId }) => {
+    await getViewer(ctx);
+    return await ctx.db
       .query("quotes")
       .withIndex("by_dealId", (q) => q.eq("dealId", dealId))
       .order("desc")
-      .take(40),
+      .take(40);
+  },
 });
 
 /** Request Lalamove quotations. Unchanged, unexpired quotes are reused and repeat clicks are ignored. */
@@ -41,8 +44,8 @@ export const request = mutation({
     expectedVersion: v.number(),
     services: v.array(v.object({ key: v.string(), specialRequests: v.array(v.string()) })),
   },
-  handler: async (ctx, { actor, dealId, expectedVersion, services }) => {
-    requireRole(actor, "owner", "sales");
+  handler: async (ctx, { dealId, expectedVersion, services }) => {
+    const actor = await getActor(ctx, "owner", "sales");
     const deal = await quotableDeal(ctx, dealId, expectedVersion);
     if (!services.length || services.length > 4) fail("Pick 1–4 vehicles");
     const now = Date.now();
@@ -72,6 +75,7 @@ export const request = mutation({
         status: "pending",
         dedupeKey,
         requestedAt: now,
+        requestedBy: actor,
         unloading: initialUnloading(deal),
         ...(s.specialRequests.length ? { note: s.specialRequests.join(", ") } : {}),
       });
@@ -95,12 +99,20 @@ export const addManual = mutation({
     unloading: extraStatus,
     unloadingSen: v.optional(v.number()),
     validHours: v.number(),
+    reference: v.string(),
+    terms: v.string(),
+    confirmed: v.boolean(),
   },
   handler: async (ctx, a) => {
-    requireRole(a.actor, "owner", "sales");
+    const actor = await getActor(ctx, "owner", "sales");
     const deal = await quotableDeal(ctx, a.dealId, a.expectedVersion);
     if (!a.carrier.trim()) fail("Carrier name");
-    if (!(a.totalSen > 0)) fail("Total must be positive");
+    if (!Number.isSafeInteger(a.totalSen) || a.totalSen <= 0) fail("Total must be positive whole sen");
+    if (!Number.isFinite(a.validHours) || a.validHours <= 0 || a.validHours > 720) fail("Quote validity must be between 0 and 720 hours");
+    if (!a.service.trim() || !a.confirmed || !a.reference.trim() || !a.terms.trim()) fail("Confirm the actual carrier reply, vehicle, reference and full terms");
+    if (a.carrier.length > 200 || a.reference.length > 500 || a.terms.length > 2000) fail("Carrier details are too long");
+    if (a.unloadingSen != null && (!Number.isSafeInteger(a.unloadingSen) || a.unloadingSen < 0)) fail("Invalid unloading cost");
+    if (a.unloading === "excluded" && a.unloadingSen == null) fail("Enter the confirmed unloading charge");
     if (a.unloading === "included" && a.unloadingSen != null) fail("Unloading is already in the total");
     const now = Date.now();
     await ctx.db.insert("quotes", {
@@ -117,9 +129,12 @@ export const addManual = mutation({
       totalSen: Math.round(a.totalSen),
       unloading: a.unloading,
       ...(a.unloading === "excluded" && a.unloadingSen != null ? { unloadingSen: Math.round(a.unloadingSen) } : {}),
-      enteredBy: a.actor,
+      enteredBy: actor,
+      reference: a.reference.trim(),
+      terms: a.terms.trim(),
+      verifiedAt: now,
     });
-    await audit(ctx, a.actor, "quote", `deal:${a.dealId}`, `${a.carrier.trim()} quote added`);
+    await audit(ctx, actor, "quote", `deal:${a.dealId}`, `${a.carrier.trim()} quote added`);
     return null;
   },
 });
@@ -127,8 +142,8 @@ export const addManual = mutation({
 /** Demo only: the three synthetic carrier replies from AdvancedWareorb.md §8. */
 export const addDemoReplies = mutation({
   args: { actor, dealId: v.id("deals"), expectedVersion: v.number() },
-  handler: async (ctx, { actor, dealId, expectedVersion }) => {
-    requireRole(actor, "owner", "sales");
+  handler: async (ctx, { dealId, expectedVersion }) => {
+    const actor = await getActor(ctx, "owner", "sales");
     if (!(await getSettings(ctx)).demoMode) fail("Demo mode is off");
     const deal = await quotableDeal(ctx, dealId, expectedVersion);
     const now = Date.now();
@@ -158,16 +173,21 @@ export const addDemoReplies = mutation({
 
 /** Record whether unloading is inside a quote, or its confirmed extra charge. */
 export const setUnloading = mutation({
-  args: { actor, quoteId: v.id("quotes"), unloading: extraStatus, unloadingSen: v.optional(v.number()) },
-  handler: async (ctx, { actor, quoteId, unloading, unloadingSen }) => {
-    requireRole(actor, "owner", "sales");
+  args: { actor, quoteId: v.id("quotes"), expectedVersion: v.number(), unloading: extraStatus, unloadingSen: v.optional(v.number()) },
+  handler: async (ctx, { quoteId, expectedVersion, unloading, unloadingSen }) => {
+    const actor = await getActor(ctx, "owner", "sales");
     const q = (await ctx.db.get("quotes", quoteId)) ?? fail("Quote not found");
+    const deal = await quotableDeal(ctx, q.dealId, expectedVersion);
+    if (q.dealVersion !== deal.version || (q.expiresAt ?? 0) <= Date.now()) fail("Quote is stale or expired");
+    if (unloadingSen != null && (!Number.isSafeInteger(unloadingSen) || unloadingSen < 0)) fail("Invalid unloading charge");
     if (unloading === "included" && unloadingSen != null) fail("Unloading is already in the total");
     if (unloading === "excluded" && !(unloadingSen != null && unloadingSen >= 0)) fail("Enter the unloading charge");
     await ctx.db.patch("quotes", quoteId, {
       unloading,
       unloadingSen: unloading === "excluded" ? Math.round(unloadingSen!) : undefined,
+      dealVersion: deal.version + 1,
     });
+    await ctx.db.patch("deals", deal._id, { stateVersion: (deal.stateVersion ?? 0) + 1, version: deal.version + 1, status: "offer_ready", proposal: undefined, decision: undefined, updatedAt: Date.now() });
     await audit(ctx, actor, "quote_extra", `deal:${q.dealId}`, `Unloading ${unloading}`);
     return null;
   },
@@ -181,7 +201,10 @@ export const forFetch = internalQuery({
     const quote = await ctx.db.get("quotes", quoteId);
     if (!quote || quote.status !== "pending") return null;
     const deal = await ctx.db.get("deals", quote.dealId);
-    if (!deal?.destination) return null;
+    if (!deal?.destination || deal.version !== quote.dealVersion || !QUOTABLE.includes(deal.status)) return null;
+    const staffId = quote.requestedBy?.staffId ? ctx.db.normalizeId("staff", quote.requestedBy.staffId) : null;
+    const staff = staffId ? await ctx.db.get("staff", staffId) : null;
+    if (!staff || staff.status !== "active" || !["owner", "sales"].includes(staff.role)) return null;
     return {
       service: quote.service,
       collectAt: deal.collectAt,

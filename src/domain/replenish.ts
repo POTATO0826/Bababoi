@@ -28,6 +28,9 @@ export interface Suggestion {
 export function suggest(x: ReplenishInput): Suggestion {
   const { rule } = x;
   const available = x.onHand - x.reserved;
+  if (!Number.isSafeInteger(x.unitCostSen) || x.unitCostSen <= 0) {
+    return { status: "insufficient", target: 0, raw: 0, suggested: 0, limitedBy: null, lines: ["Record the purchase unit cost before estimating a replenishment budget"] };
+  }
   if (x.historyDays < rule.windowDays || x.netSales <= 0) {
     return {
       status: "insufficient",

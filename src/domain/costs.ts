@@ -16,6 +16,9 @@ export interface QuoteLike {
   unloading: ExtraStatus;
   /** Confirmed unloading charge outside `totalSen` (only with `unloading: "excluded"`). */
   unloadingSen?: number;
+  reference?: string;
+  terms?: string;
+  verifiedAt?: number;
 }
 
 export interface DealCostLike {
@@ -32,7 +35,8 @@ export type Comparable =
 
 /** Quote total + confirmed required extras the total excludes. */
 export function comparable(q: QuoteLike, deal: DealCostLike): Comparable {
-  if (q.status !== "ok" || q.totalSen == null) return { kind: "incomplete", knownSen: 0, missing: ["quote total"] };
+  if (q.status !== "ok" || q.totalSen == null || !Number.isSafeInteger(q.totalSen) || q.totalSen <= 0) return { kind: "incomplete", knownSen: 0, missing: ["valid quote total"] };
+  if (q.unloadingSen != null && (!Number.isSafeInteger(q.unloadingSen) || q.unloadingSen < 0)) return { kind: "incomplete", knownSen: q.totalSen, missing: ["valid unloading charge"] };
   if (q.unloading === "included" && q.unloadingSen != null) {
     throw new Error("Unloading is already inside the quoted total; it cannot be added again.");
   }
@@ -47,7 +51,7 @@ export function quoteState(q: QuoteLike, deal: Pick<DealCostLike, "version">, no
   if (q.status === "pending") return "pending";
   if (q.status === "error") return "error";
   if (q.dealVersion !== deal.version) return "stale";
-  if (q.expiresAt != null && q.expiresAt <= now) return "expired";
+  if (q.expiresAt == null || !Number.isFinite(q.expiresAt) || q.expiresAt <= now) return "expired";
   return "current";
 }
 
@@ -68,6 +72,14 @@ export function rankQuotes<Q extends QuoteLike>(quotes: readonly Q[], deal: Deal
     }
     if (q.source === "demo_fallback") {
       other.push({ quote: q, reason: "Saved demo" });
+      continue;
+    }
+    if (q.source === "lalamove_sandbox") {
+      other.push({ quote: q, reason: "Sandbox only" });
+      continue;
+    }
+    if (!q.verifiedAt || !q.reference?.trim() || !q.terms?.trim()) {
+      other.push({ quote: q, reason: "Carrier confirmation needed" });
       continue;
     }
     const c = comparable(q, deal);

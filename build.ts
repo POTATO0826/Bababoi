@@ -21,6 +21,14 @@ const result = await Bun.build({
   },
 });
 
+if (!result.success) {
+  for (const log of result.logs) console.error(log);
+  throw new Error("Frontend build failed; no release should be published.");
+}
+
+// Static-host liveness only; this does not assert that authentication or the ledger is healthy.
+await Bun.write(path.join(outdir, "health.json"), JSON.stringify({ service: "wareorb-frontend", status: "ok" }));
+
 for (const output of result.outputs) {
   console.log(` ${path.relative(process.cwd(), output.path)}  ${(output.size / 1024).toFixed(1)} KB`);
 }

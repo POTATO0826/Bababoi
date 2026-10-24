@@ -1,4 +1,7 @@
-import { useEffect } from "react";
+import { SignInButton, useAuth, useClerk, useUser } from "@clerk/react";
+import { useAction, useConvexAuth, useQuery } from "convex/react";
+import { useEffect, useState } from "react";
+import { api } from "@convex/_generated/api";
 import { openAgent } from "@/actions";
 import { closePanel } from "@/commands";
 import { Header } from "@/components/header";
@@ -11,7 +14,11 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useLayoutTier } from "@/hooks/use-layout";
 import { cn } from "@/lib/utils";
-import { getWare, useWare } from "@/store";
+import { getWare, setIdentity, useWare, type StaffProfile } from "@/store";
+import { Button } from "@/components/ui/button";
+import { WarehouseIcon } from "@/components/common";
+import { errorText } from "@/convex";
+import { setAuthTokenProvider } from "@/auth-token";
 
 // Body grid per docs/design-handoff.md → Layout. `stacked` (<720px) is an addition for phones.
 const COLUMNS = {
@@ -44,6 +51,72 @@ function useShortcuts() {
 }
 
 export function App() {
+  const { isLoading, isAuthenticated } = useConvexAuth();
+  const profile = useQuery(api.access.me, isAuthenticated ? {} : "skip");
+  const activate = useAction(api.access.activate);
+  const { signOut } = useClerk();
+  const { getToken } = useAuth();
+  const { user } = useUser();
+  const [activating, setActivating] = useState(false);
+  const [activationError, setActivationError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setAuthTokenProvider(null);
+      return;
+    }
+    setAuthTokenProvider(() => getToken({ template: "convex" }));
+    return () => setAuthTokenProvider(null);
+  }, [getToken, isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated || profile === null) setIdentity(null);
+    else if (profile) setIdentity(profile);
+  }, [isAuthenticated, profile]);
+
+  if (isLoading || (isAuthenticated && profile === undefined)) {
+    return <AccessScreen title="Opening WareOrb" description="Checking your staff access…" />;
+  }
+  if (!isAuthenticated) {
+    return (
+      <AccessScreen title="Your warehouse, in view" description="Sign in with your staff account to open the live warehouse.">
+        <SignInButton mode="modal"><Button className="w-full">Sign in</Button></SignInButton>
+      </AccessScreen>
+    );
+  }
+  if (!profile) {
+    return (
+      <AccessScreen title="Access pending" description="An owner must invite your verified email address before you can view warehouse records.">
+        <p className="mb-4 text-center text-xs text-muted-foreground">Signed in as {user?.primaryEmailAddress?.emailAddress ?? "your account"}</p>
+        {activationError && <p role="alert" className="mb-3 text-center text-xs text-destructive">{activationError}</p>}
+        <Button className="w-full" disabled={activating} onClick={async () => {
+          setActivating(true);
+          setActivationError(null);
+          try {
+            const result = await activate({});
+            if (!result) setActivationError("No invitation matches a verified email on this account. Ask the owner to invite you.");
+          } catch (e) { setActivationError(errorText(e)); }
+          finally { setActivating(false); }
+        }}>{activating ? "Checking invitation…" : "Activate invitation"}</Button>
+        <Button variant="ghost" className="mt-2 w-full" onClick={() => void signOut()}>Sign out</Button>
+      </AccessScreen>
+    );
+  }
+  return <Workspace profile={profile} />;
+}
+
+function AccessScreen({ title, description, children }: { title: string; description: string; children?: React.ReactNode }) {
+  return <main className="flex min-h-screen items-center justify-center bg-background p-5">
+    <section className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl">
+      <div className="mx-auto mb-5 flex size-12 items-center justify-center rounded-xl border border-border-strong bg-raised-2 text-brand"><WarehouseIcon /></div>
+      <h1 className="text-center text-xl font-semibold">{title}</h1>
+      <p className="mt-2 mb-6 text-center text-sm text-muted-foreground">{description}</p>
+      {children}
+    </section>
+  </main>;
+}
+
+function Workspace({ profile }: { profile: StaffProfile }) {
   useShortcuts();
   const { tier } = useLayoutTier();
   const agentOpen = useWare((s) => s.agentOpen);
@@ -53,7 +126,7 @@ export function App() {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <LedgerSync />
+      <LedgerSync owner={profile.role === "owner"} />
       <div className={cn("grid grid-rows-[52px_minmax(0,1fr)]", fixedRows ? "h-screen" : "min-h-screen")}>
         <Header />
         <div

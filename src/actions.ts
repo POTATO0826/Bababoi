@@ -1,12 +1,10 @@
 // Composite actions shared by the inventory list, the 3D scene and the Jarvis voice agent.
-import { toast } from "sonner";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
 import { closePanel, commandById, openCommand, type CommandId } from "@/commands";
-import { convex, errorText, run } from "@/convex";
+import { convex } from "@/convex";
 import {
   CATEGORY_INFO,
-  DEMO_SKU,
   available,
   isLow,
   type Category,
@@ -16,7 +14,6 @@ import {
   type Sku,
   type ZoneId,
 } from "@/data/catalog";
-import { baysNeeded, planBays, slotLabel } from "@/data/inventory";
 import { SLOT_BY_ID } from "@/data/layout";
 import { actorNow, getInventory, getWare, setWare, type ViewMode } from "@/store";
 import { scanToReceipt } from "@/scan";
@@ -422,7 +419,6 @@ function answerOffline(q: string) {
     return;
   }
   if (!hit && mentioned) hit = mentioned.skus[0] ?? null;
-  if (!hit && /sofa/.test(q)) hit = inv.byCode.get(DEMO_SKU) ?? null;
 
   if (hit) {
     const target = hit;
@@ -439,67 +435,10 @@ function answerOffline(q: string) {
 // ── Stock ledger ──────────────────────────────────────────────────────────
 // Every change is a role-checked Convex mutation; the map updates from the live snapshot.
 
-export interface NewModelInput {
-  category: CategoryId;
-  shape: ShapeOption;
-  model: string;
-  variant: string;
-  color: string;
-  sku: string;
-  onHand: number;
-  incoming: number;
-}
-
 export function skuPrefix(category: CategoryId, shape: ShapeOption) {
   return shape.prefix ?? CATEGORY_INFO.find((c) => c.id === category)!.prefix;
 }
 
 export function capFor(category: CategoryId, shape: ShapeOption) {
   return shape.cap ?? CATEGORY_INFO.find((c) => c.id === category)!.cap;
-}
-
-/** Where a delivery would go right now (free bays, preferring the category's zones). */
-export function previewPlacement(category: CategoryId, shape: ShapeOption, units: number) {
-  const records = getWare().skus;
-  const need = baysNeeded(units, capFor(category, shape));
-  const bays = planBays(records, category, need);
-  return { need, bays, label: slotLabel(bays), fits: bays.length >= need };
-}
-
-/** Warehouse adds a model the catalogue doesn't have and places the counted units. */
-export async function receiveNewModel(input: NewModelInput): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    const code = await convex.mutation(api.receiving.createModel, {
-      actor: actorNow(),
-      category: input.category,
-      kind: input.shape.kind,
-      cap: capFor(input.category, input.shape),
-      doors: input.shape.doors ?? 2,
-      model: input.model,
-      variant: input.variant,
-      color: input.color,
-      code: input.sku,
-      units: input.onHand,
-    });
-    setWare({ query: "", receiveOpen: false });
-    toast.success(`${input.model} · ${input.variant}`, { description: `${input.onHand} units placed` });
-    // The snapshot arrives a moment later; focus the new model when it does.
-    const t = setInterval(() => {
-      const sku = getInventory().byCode.get(code);
-      if (sku) {
-        clearInterval(t);
-        selectSku(sku);
-      }
-    }, 150);
-    setTimeout(() => clearInterval(t), 4000);
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: errorText(e) };
-  }
-}
-
-/** Owner: restore the synthetic demo ledger. */
-export async function resetDemo() {
-  await run(convex.mutation(api.seed.reset, { actor: actorNow() }), "Demo data reset");
-  setWare({ selected: null, zone: null, hoverBay: null, panelOpen: false, detail: null });
 }

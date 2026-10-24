@@ -11,7 +11,7 @@ const KINDS = [
 export const furnitureKind = v.union(...KINDS.map((k) => v.literal(k)));
 
 export const role = v.union(v.literal("owner"), v.literal("sales"), v.literal("warehouse"));
-export const actor = v.object({ role, name: v.string() });
+export const actor = v.object({ role, name: v.string(), staffId: v.optional(v.string()) });
 export const loc = v.object({ slot: v.string(), qty: v.number() });
 export const pkg = v.object({ lCm: v.number(), wCm: v.number(), hCm: v.number(), kg: v.number() });
 export const extraStatus = v.union(v.literal("included"), v.literal("excluded"), v.literal("unknown"));
@@ -38,6 +38,8 @@ export const receiptLine = v.object({
   skuCode: v.union(v.string(), v.null()),
   candidates: v.array(v.string()),
   qty: v.union(v.number(), v.null()),
+  purchaseOrderId: v.optional(v.id("purchaseOrders")),
+  locations: v.optional(v.array(loc)),
   condition: v.string(),
   confidence: v.number(),
   questions: v.array(v.string()),
@@ -46,6 +48,19 @@ export const receiptLine = v.object({
 });
 
 export default defineSchema({
+  staff: defineTable({
+    email: v.string(),
+    name: v.string(),
+    role,
+    status: v.union(v.literal("invited"), v.literal("active"), v.literal("inactive")),
+    tokenIdentifier: v.optional(v.string()),
+    invitedAt: v.number(),
+    activatedAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index("by_email", ["email"])
+    .index("by_tokenIdentifier", ["tokenIdentifier"])
+    .index("by_role_and_status", ["role", "status"]),
   skus: defineTable({
     code: v.string(),
     category: v.union(
@@ -96,6 +111,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_status", ["status"])
+    .index("by_batchId_and_status", ["batchId", "status"])
     .index("by_dealId", ["dealId"]),
 
   purchaseOrders: defineTable({
@@ -105,10 +121,16 @@ export default defineSchema({
     qtyReceived: v.number(),
     status: v.union(v.literal("open"), v.literal("closed"), v.literal("cancelled")),
     rationale: v.optional(v.string()),
+    supplier: v.optional(v.string()),
+    orderRef: v.optional(v.string()),
+    orderKey: v.optional(v.string()),
+    confirmedAt: v.optional(v.number()),
+    unitCostSen: v.optional(v.number()),
     createdBy: actor,
     createdAt: v.number(),
   })
     .index("by_status", ["status"])
+    .index("by_orderKey", ["orderKey"])
     .index("by_skuCode_and_status", ["skuCode", "status"]),
 
   movements: defineTable({
@@ -135,9 +157,13 @@ export default defineSchema({
 
   receipts: defineTable({
     code: v.string(),
+    version: v.optional(v.number()),
+    postedVersion: v.optional(v.number()),
     status: v.union(v.literal("needs_review"), v.literal("posted"), v.literal("rejected")),
     supplier: v.optional(v.string()),
     docRef: v.optional(v.string()),
+    docKey: v.optional(v.string()),
+    receivedAt: v.optional(v.number()),
     evidence: v.array(
       v.object({
         kind: v.union(v.literal("photo"), v.literal("document"), v.literal("voice"), v.literal("note")),
@@ -152,6 +178,8 @@ export default defineSchema({
       status: v.union(v.literal("idle"), v.literal("running"), v.literal("done"), v.literal("error")),
       error: v.optional(v.string()),
       at: v.optional(v.number()),
+      jobVersion: v.optional(v.number()),
+      requestedBy: v.optional(actor),
     }),
     createdBy: actor,
     createdAt: v.number(),
@@ -159,7 +187,7 @@ export default defineSchema({
     postedAt: v.optional(v.number()),
     rejectReason: v.optional(v.string()),
     synthetic: v.boolean(),
-  }).index("by_status", ["status"]),
+  }).index("by_status", ["status"]).index("by_docKey", ["docKey"]),
 
   deals: defineTable({
     code: v.string(),
@@ -187,6 +215,7 @@ export default defineSchema({
     packingSen: v.number(),
     fitConfirmedBy: v.optional(v.string()),
     version: v.number(),
+    stateVersion: v.optional(v.number()),
     proposal: v.optional(
       v.object({
         version: v.number(),
@@ -203,17 +232,32 @@ export default defineSchema({
         by: actor,
         at: v.number(),
         reason: v.optional(v.string()),
+        deliverySen: v.optional(v.number()),
+        quoteReference: v.optional(v.string()),
+        terms: v.optional(v.string()),
       }),
     ),
-    booking: v.optional(v.object({ ref: v.string(), carrier: v.string(), simulated: v.literal(true) })),
+    booking: v.optional(v.object({ ref: v.string(), carrier: v.string(), simulated: v.boolean(), recordedBy: v.optional(actor), recordedAt: v.optional(v.number()) })),
     reservationId: v.optional(v.id("reservations")),
     collectedAt: v.optional(v.number()),
+    collectedQty: v.optional(v.number()),
     createdBy: actor,
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_status", ["status"])
+    .index("by_batchId_and_status", ["batchId", "status"])
     .index("by_batchId", ["batchId"]),
+
+  collections: defineTable({
+    dealId: v.id("deals"),
+    requestId: v.string(),
+    payload: v.string(),
+    qty: v.number(),
+    at: v.number(),
+    lines: v.array(loc),
+    actor,
+  }).index("by_dealId_and_requestId", ["dealId", "requestId"]),
 
   quotes: defineTable({
     dealId: v.id("deals"),
@@ -234,6 +278,10 @@ export default defineSchema({
     note: v.optional(v.string()),
     error: v.optional(v.object({ kind: v.string(), message: v.string(), retryAfterMs: v.optional(v.number()) })),
     enteredBy: v.optional(actor),
+    reference: v.optional(v.string()),
+    terms: v.optional(v.string()),
+    verifiedAt: v.optional(v.number()),
+    requestedBy: v.optional(actor),
   })
     .index("by_dealId", ["dealId"])
     .index("by_dedupeKey", ["dedupeKey"]),

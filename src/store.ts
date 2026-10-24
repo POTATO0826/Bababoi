@@ -3,7 +3,7 @@ import { create } from "zustand";
 import type { api } from "@convex/_generated/api";
 import type { CategoryId, FloorId, SkuRecord, ZoneId } from "@/data/catalog";
 import { deriveInventory } from "@/data/inventory";
-import type { Actor, Role } from "@/domain/types";
+import type { Role } from "@/domain/types";
 
 export type ViewMode = "iso" | "top";
 export type OrbState = "idle" | "listening" | "thinking" | "speaking";
@@ -28,7 +28,15 @@ export interface Settings {
   showEmptyBays: boolean;
 }
 
-export const PEOPLE: Record<Role, string> = { owner: "Mei", sales: "Arif", warehouse: "J. Lim" };
+export const PEOPLE: Record<Role, string> = { owner: "Owner", sales: "Sales", warehouse: "Warehouse" };
+
+export interface StaffProfile {
+  _id: string;
+  name: string;
+  email: string;
+  role: Role;
+  active: boolean;
+}
 
 export interface WareState {
   /** Per-SKU records derived from the Convex batch ledger (see <LedgerSync/>). Read-only mirror. */
@@ -38,6 +46,7 @@ export interface WareState {
   ledgerReady: boolean;
 
   role: Role;
+  staff: StaffProfile | null;
   stage: Stage;
   detail: Detail;
   /** Text to put in the Jarvis input (e.g. "/" from the keyboard shortcut), and a tick to focus it. */
@@ -90,18 +99,6 @@ function readSettings(): Settings {
   };
 }
 
-const ROLE_KEY = "wareorb-role";
-function readRole(): Role {
-  const r = params().get("role") ?? (() => {
-    try {
-      return localStorage.getItem(ROLE_KEY);
-    } catch {
-      return null;
-    }
-  })();
-  return r === "sales" || r === "warehouse" ? r : "owner";
-}
-
 // The ledger used to live in localStorage; it is now in Convex.
 try {
   localStorage.removeItem("wareorb-ledger");
@@ -114,7 +111,8 @@ export const useWare = create<WareState>()(() => ({
   ledger: null,
   ledgerReady: false,
 
-  role: readRole(),
+  role: "warehouse",
+  staff: null,
   stage: "inventory",
   detail: null,
   chatDraft: "",
@@ -148,20 +146,22 @@ export const useWare = create<WareState>()(() => ({
 export const setWare = useWare.setState;
 export const getWare = useWare.getState;
 
-/** Switching role starts a fresh Jarvis conversation for that person. */
-export function setRole(role: Role) {
-  setWare({ role, transcript: [], detail: null, stage: "inventory" });
-  try {
-    localStorage.setItem(ROLE_KEY, role);
-  } catch {
-    // storage blocked — role still applies for this tab
-  }
+/** The authenticated server profile is the only source of staff identity in the UI. */
+export function setIdentity(staff: StaffProfile | null) {
+  setWare((s) => ({
+    staff,
+    role: staff?.role ?? "warehouse",
+    ...(s.staff?._id !== staff?._id || s.staff?.role !== staff?.role || !staff
+      ? { transcript: [], detail: null, stage: "inventory" as Stage, ledger: null, ledgerReady: false, skus: [], selected: null, agentOpen: false, receiveOpen: false }
+      : {}),
+  }));
 }
 
-/** Who is acting (simulated role), sent with every Convex write. */
-export const actorNow = (): Actor => {
-  const role = getWare().role;
-  return { role, name: PEOPLE[role] };
+/** Legacy actor argument for existing mutations; server authorization ignores it. */
+export const actorNow = () => {
+  const staff = getWare().staff;
+  if (!staff) throw new Error("Sign in as active staff to continue");
+  return { role: staff.role, name: staff.name };
 };
 
 /** Derived inventory for the current ledger (memoised). */

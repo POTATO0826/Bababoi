@@ -28,7 +28,7 @@ export const COMMANDS: Command[] = [
   { id: "deals", label: "Deals", icon: HandshakeIcon, roles: ["sales", "owner", "warehouse"], keywords: ["buyer", "offer", "sell", "买家"] },
   { id: "delivery", label: "Delivery quotes", icon: TruckIcon, roles: ["sales", "owner"], keywords: ["lalamove", "quote", "lorry", "运费", "报价"] },
   { id: "approve", label: "Approvals", icon: ShieldCheckIcon, roles: ["owner"], keywords: ["approve", "review", "审核"] },
-  { id: "collect", label: "Collection", icon: PackageCheckIcon, roles: ["warehouse"], keywords: ["dispatch", "pickup", "出货", "发货"] },
+  { id: "collect", label: "Collection", icon: PackageCheckIcon, roles: ["warehouse", "owner"], keywords: ["dispatch", "pickup", "出货", "发货"] },
   { id: "replenish", label: "Replenish", icon: ArchiveRestoreIcon, roles: ["owner"], keywords: ["reorder", "purchase", "restock", "进货", "补货"] },
 ];
 

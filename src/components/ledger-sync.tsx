@@ -8,7 +8,7 @@ import { setWare } from "@/store";
 const HISTORY_DAYS = 95;
 
 /** Mirrors the Convex ledger into the store so the 3D scene and lists keep reading `skus`. */
-export function LedgerSync() {
+export function LedgerSync({ owner }: { owner: boolean }) {
   // Day-bucketed so the query args stay stable (queries can't read the clock themselves).
   const [day, setDay] = useState(() => Math.floor(Date.now() / DAY));
   useEffect(() => {
@@ -16,15 +16,15 @@ export function LedgerSync() {
     return () => clearInterval(t);
   }, []);
   const snap = useQuery(api.ledger.snapshot, { since: (day - HISTORY_DAYS) * DAY });
-  const ensure = useMutation(api.seed.ensure);
+  const ensure = useMutation(api.access.ensureBusinessSettings);
   const asked = useRef(false);
 
   useEffect(() => {
-    if (snap === null && !asked.current) {
+    if (snap === null && owner && !asked.current) {
       asked.current = true;
       void ensure({});
     }
-  }, [snap, ensure]);
+  }, [snap, owner, ensure]);
 
   const skus = useMemo(() => (snap ? toSkuRecords(snap, Date.now()) : null), [snap]);
 

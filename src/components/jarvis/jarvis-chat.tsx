@@ -19,7 +19,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { greeting, SUGGESTIONS } from "@/roles";
-import { PEOPLE, useWare } from "@/store";
+import { useWare } from "@/store";
 import { useStageCounts } from "@/workflow";
 
 const ROLE_LABEL = { owner: "Owner", sales: "Sales", warehouse: "Warehouse" } as const;
@@ -27,6 +27,7 @@ const ROLE_LABEL = { owner: "Owner", sales: "Sales", warehouse: "Warehouse" } as
 /** Jarvis: one chat for questions, "/" commands, voice and scanning delivery notes — tuned to the current role. */
 export function JarvisChat({ drawer, className }: { drawer: boolean; className?: string }) {
   const role = useWare((s) => s.role);
+  const staffName = useWare((s) => s.staff?.name ?? "Staff");
   const transcript = useWare((s) => s.transcript);
   const orb = useWare((s) => s.orb);
   const muted = useWare((s) => s.muted);
@@ -92,7 +93,7 @@ export function JarvisChat({ drawer, className }: { drawer: boolean; className?:
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="text-[13.5px] leading-none font-semibold">Jarvis</span>
           <span className="truncate text-[11.5px] text-muted-foreground">
-            {PEOPLE[role]} · {ROLE_LABEL[role]}
+            {staffName} · {ROLE_LABEL[role]}
           </span>
         </div>
         <OrbStatus />
@@ -109,7 +110,7 @@ export function JarvisChat({ drawer, className }: { drawer: boolean; className?:
                 <Message align="start">
                   <MessageContent>
                     <Bubble variant="muted">
-                      <BubbleContent>{greeting(role, PEOPLE[role], counts)}</BubbleContent>
+                      <BubbleContent>{greeting(role, staffName, counts)}</BubbleContent>
                     </Bubble>
                   </MessageContent>
                 </Message>

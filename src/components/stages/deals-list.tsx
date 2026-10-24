@@ -1,8 +1,16 @@
+import { useMutation, usePaginatedQuery } from "convex/react";
+import { useState } from "react";
+import { api } from "@convex/_generated/api";
+import type { Id } from "@convex/_generated/dataModel";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { run } from "@/convex";
 import { showOnMap } from "@/actions";
 import { Badge } from "@/components/ui/badge";
 import type { Deal } from "@/ledger";
 import { fmtRM } from "@/domain/money";
-import { setWare, useWare } from "@/store";
+import { actorNow, setWare, useWare } from "@/store";
 import { DEAL_STATUS, isOpenDeal } from "@/workflow";
 import { NothingHere, WorkColumn, WorkList, WorkRow } from "./work-column";
 
@@ -24,6 +32,9 @@ export function DealsList({ view = "deals", className }: { view?: DealView; clas
   const ledger = useWare((s) => s.ledger);
   const role = useWare((s) => s.role);
   const detail = useWare((s) => s.detail);
+  const [creating, setCreating] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const history = usePaginatedQuery(api.ledger.dealHistory, showHistory && view === "deals" ? {} : "skip", { initialNumItems: 20 });
   const v = VIEW[view];
   const deals = (ledger?.deals ?? []).filter((d) => !v.only || v.only.includes(d.status));
   const skus = new Map(ledger?.skus.map((s) => [s.code, s]));
@@ -49,12 +60,30 @@ export function DealsList({ view = "deals", className }: { view?: DealView; clas
   };
 
   return (
-    <WorkColumn title={v.title} className={className}>
-      <WorkList label={view === "deals" ? "Open" : undefined} count={open.length}>
-        {open.map(row)}
-        {!open.length && <NothingHere title={v.empty} />}
-      </WorkList>
-      {done.length > 0 && <WorkList label="Done">{done.map(row)}</WorkList>}
+    <WorkColumn title={v.title} className={className} aside={view === "deals" && <Button variant="quiet" size="xs" onClick={() => setShowHistory(!showHistory)}>{showHistory ? "Current work" : "All history"}</Button>} action={view === "deals" && role === "owner" && <Button variant="outline" onClick={() => setCreating(!creating)}>Start sale from stock</Button>}>
+      {creating && <NewSale onDone={() => setCreating(false)} />}
+      {showHistory && view === "deals" ? <WorkList label="All deals" count={history.results.length}>
+        {history.results.map(row)}
+        {history.status === "LoadingFirstPage" && <NothingHere title="Loading deal history…" />}
+        {history.status === "Exhausted" && !history.results.length && <NothingHere title="No deal history" />}
+        {(history.status === "CanLoadMore" || history.status === "LoadingMore") && <Button size="sm" variant="outline" className="m-3" disabled={history.status === "LoadingMore"} onClick={() => history.loadMore(20)}>{history.status === "LoadingMore" ? "Loading…" : "Load more deals"}</Button>}
+      </WorkList> : <>
+        <WorkList label={view === "deals" ? "Open" : undefined} count={open.length}>{open.map(row)}{!open.length && <NothingHere title={v.empty} />}</WorkList>
+        {done.length > 0 && <WorkList label="Done">{done.map(row)}</WorkList>}
+      </>}
     </WorkColumn>
   );
+}
+
+function NewSale({ onDone }: { onDone: () => void }) {
+  const ledger = useWare((s) => s.ledger);
+  const staff = useWare((s) => s.staff);
+  const create = useMutation(api.deals.create);
+  const [batchId, setBatchId] = useState("");
+  const [assignee, setAssignee] = useState(staff?.name ?? "");
+  const [busy, setBusy] = useState(false);
+  const batches = (ledger?.batches ?? []).filter((b) => b.status === "active" && !ledger?.deals.some((d) => d.batchId === b._id && isOpenDeal(d)));
+  const free = (id: string, qty: number) => qty - (ledger?.reservations ?? []).filter((r) => r.batchId === id && r.status === "active").reduce((sum, r) => sum + r.qty, 0);
+  const available = batches.filter((b) => free(b._id, b.locations.reduce((sum, p) => sum + p.qty, 0)) > 0);
+  return <div className="flex flex-col gap-2 border-b border-border p-3.5"><span className="text-[12px] text-muted-foreground">Choose a real stock batch to prepare a buyer offer.</span><Select value={batchId} disabled={busy} onValueChange={setBatchId}><SelectTrigger className="w-full"><SelectValue placeholder="Choose stock batch" /></SelectTrigger><SelectContent>{available.map((b) => <SelectItem key={b._id} value={b._id}>{b.code} · {b.skuCode} · {free(b._id, b.locations.reduce((sum, p) => sum + p.qty, 0))} free</SelectItem>)}</SelectContent></Select><label className="text-[12px]">Person managing this sale<Input value={assignee} disabled={busy} onChange={(e) => setAssignee(e.target.value)} /></label>{!available.length && <span className="text-[12px] text-warn">No unallocated batches are available. Receive stock or open an existing sale.</span>}<div className="flex gap-2"><Button size="sm" disabled={!batchId || !assignee.trim() || busy} onClick={async () => { const batch = available.find((b) => b._id === batchId); if (!batch) return; setBusy(true); try { const id = await run(create({ actor: actorNow(), batchId: batchId as Id<"batches">, assignee }), "Sale started"); if (id) { onDone(); openDeal({ _id: id, skuCode: batch.skuCode, batchId: batch._id }, batch.locations[0]?.slot); } } finally { setBusy(false); } }}>Start sale</Button><Button size="sm" variant="outline" disabled={busy} onClick={onDone}>Cancel</Button></div></div>;
 }
