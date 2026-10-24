@@ -124,5 +124,6 @@ try {
   console.log(`[startup] ${process.platform}: first run, frontend, authenticated inventory, no inherited API keys, restart persistence and shutdown passed.`);
 } finally {
   await stop();
-  rmSync(scratch, { recursive: true, force: true });
+  // Windows can briefly retain file locks after taskkill has released the listening ports.
+  rmSync(scratch, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
 }
