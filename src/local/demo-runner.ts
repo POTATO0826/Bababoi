@@ -1,6 +1,7 @@
 // The local presentation start-up (`bun run demo`). All process, network and file access goes through
 // `DemoDeps` so tests can prove that a cloud selector stops everything before any write or request.
 import { randomBytes } from "node:crypto";
+import { join } from "node:path";
 import { LOCAL_DEMO_PRESENTER, localDemoTokenIdentifier } from "../domain/local-demo";
 import { generateDemoKeys, mintDemoToken } from "./demo-identity";
 import { childEnv, demoPorts, IsolationError, loopbackUrl, localTarget, parseEnvFile, preflight, type DemoPorts } from "./isolation";
@@ -11,6 +12,7 @@ export interface LongProcess {
 }
 
 export interface DemoDeps {
+  platform?: NodeJS.Platform;
   root: string;
   ambient: Record<string, string | undefined>;
   argv: readonly string[];
@@ -78,10 +80,13 @@ export async function runDemo(d: DemoDeps): Promise<RunningDemo> {
     if (!(await d.portFree(port))) throw new DemoError(`Port ${port} (${name}) is already in use on 127.0.0.1. Stop the other program or choose another port, e.g. ${variable}=${port + 10} bun run demo.`);
   }
   const agentUrl = loopbackUrl(`http://127.0.0.1:${ports.web}`, "Local agent URL", ports.web);
-  const cliEnv = childEnv(d.ambient, { PATH: `${nodeDir}:${d.ambient.PATH ?? ""}`, CONVEX_AGENT_MODE: "anonymous" });
+  const platform = d.platform ?? process.platform;
+  const cliEnv = childEnv(d.ambient, { CONVEX_AGENT_MODE: "anonymous" }, platform);
+  cliEnv.PATH = [nodeDir, cliEnv.PATH].filter(Boolean).join(platform === "win32" ? ";" : ":");
+  const cli = ["node", join(d.root, "node_modules", "convex", "bin", "main.js")];
   const localFlags = ["--local-cloud-port", String(ports.convex), "--local-site-port", String(ports.convexSite)];
   const convex = async (args: string[], { allowFail = false } = {}) => {
-    const r = await d.run(["bunx", "convex", ...args], cliEnv);
+    const r = await d.run([...cli, ...args], cliEnv);
     const output = r.output.split("\n").filter((l) => l.trim() && !/ExperimentalWarning|trace-warnings|agent mode is in beta/.test(l)).slice(-12).join("\n");
     if (r.code !== 0 && !allowFail) throw new DemoError(`\`convex ${args[0]}\` failed:\n${output}${/download|fetch failed|ENOTFOUND|ECONNRESET|403/i.test(output) ? "\nThe first run downloads the local Convex backend from github.com; check the network connection." : ""}`);
     return { code: r.code, output };
@@ -114,7 +119,7 @@ export async function runDemo(d: DemoDeps): Promise<RunningDemo> {
   target = localTarget(d.read(".env.local"), ports);
 
   // 4. Keep the local backend running.
-  const backend = d.start(["bunx", "convex", "dev", "--typecheck", "disable", "--tail-logs", "always", ...localFlags], cliEnv, ".convex/demo-backend.log");
+  const backend = d.start([...cli, "dev", "--typecheck", "disable", "--tail-logs", "always", ...localFlags], cliEnv, ".convex/demo-backend.log");
   let web: LongProcess | null = null;
   const stop = () => { web?.kill(); backend.kill(); };
   try {
@@ -172,7 +177,7 @@ export async function runDemo(d: DemoDeps): Promise<RunningDemo> {
       WAREORB_LOCAL_DEMO_PRIVATE_JWK: privateJwk,
       WAREORB_LOCAL_AGENT_SECRET: secret,
       PI_TELEMETRY: "0",
-    }));
+    }, platform));
     const status = await d.agentStatus().catch((e) => ({ ready: false, reason: e instanceof Error ? e.message : "unknown error" }) as Awaited<ReturnType<DemoDeps["agentStatus"]>>);
     d.log(status.ready ? `Jarvis: connected to ${status.provider}/${status.model}${status.subscription ? " (subscription)" : ""}` : `Jarvis not connected yet: open the page and use Log in in Jarvis (${status.reason})`);
     d.log(`Open ${webUrl} — Ctrl+C stops the demo (data stays in .convex/local).`);

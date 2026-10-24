@@ -1,0 +1,11 @@
+title = "WareOrb secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Explicitly fake Lalamove credentials used only by the signed-request test fixture"
+condition = "AND"
+regexTarget = "match"
+regexes = ['''sk_test_(MOCKSECRET0+1|WRONGSECRET0+|BADREPLACEMENT0+|MOCKHOSTED0+|MOCKWRONGSECRET0+|WRONGBROWSERSECRET0+|0123456789abcdef0123456789abcdef)\b''']
+paths = ['''(^|/)(src/local/(lalamove-mock\.ts|config\.test\.ts|commands\.test\.ts|routes\.test\.ts|lalamove\.test\.ts)|tests/browser/run\.ts)$''']

@@ -1,17 +1,40 @@
 # WareOrb
 
-Two-floor 3D furniture-stock warehouse console: searchable inventory, an isometric digital twin, a stock details popup and the Jarvis voice agent. Built from the design handoff in `docs/design-handoff.md` (product brief: `docs/concept.md`).
+Local furniture warehouse demo: receiving, inventory, sales, replenishment, a two-floor 3D digital twin and the Jarvis assistant. Warehouse data is stored on the presentation computer and survives restarts. No warehouse account or public hosting is required.
 
 **Stack:** Bun (runtime, dev server, bundler) · TypeScript · React 19 · React Three Fiber + drei · zustand · Tailwind v4 + shadcn/ui · Orbkit SHDR-11 orb.
 
-```bash
-bun install
-bun dev          # http://localhost:3000 with hot reload
-bun run build    # static build into dist/
-bun run typecheck
+## Run on Windows, macOS or Linux
+
+Install **Bun 1.4.3 or newer** from [bun.sh](https://bun.sh/docs/installation) and **Node.js 24 LTS** from [nodejs.org](https://nodejs.org/en/download). Reopen the terminal after installation. On macOS, Homebrew users can run `brew install bun node@24`.
+
+Run these commands in a fresh checkout (PowerShell, Terminal or a Linux shell):
+
+```sh
+git clone https://github.com/POTATO0826/Bababoi.git
+cd Bababoi
+bun install --frozen-lockfile
+bun run demo
 ```
 
-URL flags override the prototype's tweakable props: `?autoSpin=1`, `?voiceReplies=0`, `?showEmptyBays=0`. The low-stock threshold is the business setting (default 2), used alike by the inventory, map, badges and Jarvis.
+Open **http://127.0.0.1:3000**. The first run downloads the local backend and loads synthetic inventory. Internet access is needed for that download and for AI or Lalamove requests. `Ctrl+C` stops the app; `bun run demo` starts it again with the same data. `bun run demo:reset` deliberately replaces local warehouse data with fresh demo data.
+
+Connect Claude in **Jarvis → Log in** (or `/login`); disconnect with **Log out** or `/logout`. Connect Lalamove sandbox keys in **Delivery → Connect** for real sandbox quotes. Both connections keep credentials only in server memory for that run. A warehouse account, terminal AI login and `.env` editing are unnecessary.
+
+**Do not copy credentials or `.env.local` from another computer.** Startup generates this computer's private local settings and database in ignored files. An existing cloud `.env.local` is refused: use a separate checkout. Keep keys out of Git, screenshots and chat. The demo requires network access for live Claude/Lalamove, and Lalamove supports sandbox quotes only.
+
+See [local setup, optional ports and troubleshooting](docs/local-demo.md), [demo scenarios](docs/demo-data.md) and [configuration template](.env.example). Chrome or Edge supports live voice transcription; microphone permissions and browser recognition availability apply. Photo reading needs a connected Claude provider.
+
+## Checks
+
+```sh
+bun run check          # domain/backend tests, both typechecks and production build
+bun run test:startup   # isolated first run + restart, inventory access and process cleanup
+```
+
+GitHub Actions runs these checks on Windows, macOS and Linux with Node 24 and Bun 1.4.3, plus a full-history credential scan. The startup test uses a disposable database and never copies your `.env.local` or provider credentials. `bun dev` alone is for frontend development and does not prepare a local demo backend.
+
+URL flags include `?autoSpin=1`, `?voiceReplies=0`, `?showEmptyBays=0`. The low-stock threshold is the business setting (default 2), used alike by the inventory, map, badges and Jarvis.
 
 ## Layout
 
@@ -38,5 +61,5 @@ The prototype drew the warehouse as SVG polygons. The R3F rebuild keeps its layo
 ## Notes
 
 - Voice input needs a browser with `SpeechRecognition` (Chrome, Edge). Elsewhere, tap the suggestions. Replies use `speechSynthesis`.
-- Jarvis matches commands with keyword rules (swap in an LLM/tooling later). It never changes stock; transfer requests are declined pending authorised confirmation.
+- Jarvis uses the connected AI provider and warehouse tools to read inventory, explain replenishment and request validated sandbox delivery quotes. Stock changes use the warehouse forms and their confirmation steps.
 - In dev, `__ware.getState()` in the browser console shows the app state.

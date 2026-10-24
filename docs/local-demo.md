@@ -24,12 +24,38 @@ is `.convex/demo-backend.log`.
 
 ## Requirements
 
-- **Bun** (project dependencies are pinned in `bun.lock`).
+- **Bun 1.4.3 or newer** (project dependencies are pinned in `bun.lock`).
 - **Node.js 20, 22 or 24** for the local backend's Node actions. Found automatically from `PATH`,
   Homebrew (`brew install node@24`, keg-only is fine), `/opt/node2x`, nvm, fnm or Volta; or set
   `WAREORB_CONVEX_NODE=/path/to/node`.
 - The **first run downloads** the local Convex backend binary from github.com.
 - **Chrome** for live voice transcripts (see Voice below).
+
+### Windows / PowerShell
+
+Install Bun and Node.js 24 using their official Windows installers, then reopen PowerShell. The same
+`bun install --frozen-lockfile` and `bun run demo` commands work without Bash, Homebrew, WSL or Docker.
+The startup finds `node.exe`, accepts paths with spaces, and retains the Windows system environment.
+If you installed Node somewhere unusual:
+
+```powershell
+$env:WAREORB_CONVEX_NODE = 'C:\Program Files\nodejs\node.exe'
+bun run demo
+```
+
+Optional port overrides use the shell's own syntax. For example, in PowerShell:
+
+```powershell
+$env:WAREORB_DEMO_PORT = '3230'
+$env:WAREORB_CONVEX_PORT = '3231'
+$env:WAREORB_CONVEX_SITE_PORT = '3232'
+bun run demo
+```
+
+On macOS/Linux, use `export WAREORB_DEMO_PORT=3230` (and similarly for the other ports). All three
+ports must differ. Never share `.env.local` or `.convex/` to configure another computer: a fresh
+checkout generates its own local identity and database. Installers and the first backend download
+need internet; live AI and delivery quotes also need internet.
 
 ## Connecting the agent from the web page (/login)
 

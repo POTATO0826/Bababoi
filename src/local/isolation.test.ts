@@ -66,11 +66,22 @@ describe("preflight over every source the Convex CLI reads", () => {
     }
   });
 
+  test("rejects the CLI's alternate dotenv assignment syntax and case variants", () => {
+    for (const text of [
+      "CONVEX_DEPLOY_KEY: prod:fake-value|fixture\n",
+      "convex_deploy_key=prod:fake-value|fixture\n",
+      "export CONVEX_DEPLOYMENT: 'prod:fixture'\n",
+      "CONVEX_DEPLOY_KEY=prod:fixture\nconvex_deploy_key=\n",
+      "CONVEX_DEPLOYMENT=prod:fixture\nconvex_deployment=anonymous:fixture\n",
+      "CONVEX_URL=https://cloud.example\nconvex_url=http://127.0.0.1:3210\n",
+    ]) refuses(() => preflight({ ambient: {}, envLocal: text, dotEnv: null, ports }), /refused to start/);
+  });
+
   test("reports ambient selectors by name; they are dropped from child processes", () => {
     const ambient = { CONVEX_DEPLOY_KEY: "prod:abc", CONVEX_SELF_HOSTED_URL: "https://x", CONVEX_DEPLOYMENT: "prod:x", PATH: "/bin", HOME: "/home/p", CLERK_SECRET_KEY: "sk_live", ANTHROPIC_API_KEY: "sk-ant" };
     expect(preflight({ ambient, envLocal: null, dotEnv: null, ports }).droppedAmbient).toEqual(["CONVEX_DEPLOY_KEY", "CONVEX_SELF_HOSTED_URL"]);
     const env = childEnv(ambient, { CONVEX_AGENT_MODE: "anonymous" });
-    expect(Object.keys(env).sort()).toEqual(["CONVEX_AGENT_MODE", "HOME", "NO_PROXY", "PATH", "no_proxy"]);
+    expect(Object.keys(env).sort()).toEqual(["CONVEX_AGENT_MODE", "HOME", "NO_PROXY", "PATH", ...(process.platform === "win32" ? [] : ["no_proxy"])]);
     expect(env.NO_PROXY).toContain("127.0.0.1");
   });
 });
@@ -82,6 +93,7 @@ describe("ports and the local target", () => {
     refuses(() => demoPorts({ WAREORB_DEMO_PORT: "3210" }), /must differ/);
     refuses(() => demoPorts({ WAREORB_CONVEX_PORT: "80" }), /1024 to 65535/);
     refuses(() => demoPorts({ WAREORB_DEMO_PORT: "3000abc" }), /not a port/);
+    refuses(() => demoPorts({ WAREORB_CONVEX_PORT: "65535" }), /65535/);
   });
 
   test("localTarget requires the CLI to have written loopback URLs for the configured ports", () => {
@@ -93,5 +105,29 @@ describe("ports and the local target", () => {
   test("dotenv parsing handles quotes, export and comments", () => {
     const m = parseEnvFile("# c\nexport A='1 2'\nB=\"x\"\nC=plain # trailing\n  D = spaced  \n");
     expect([...m]).toEqual([["A", "1 2"], ["B", "x"], ["C", "plain"], ["D", "spaced"]]);
+    expect(parseEnvFile('A: value\nB="with # hash" # comment\nC=plain#comment\n').get("A")).toBe("value");
+  });
+});
+
+describe("cross-platform child environments", () => {
+  test("Windows normalizes Path and preserves OS executable lookup without forwarding credentials", () => {
+    const env = childEnv({
+      Path: "C:\\Program Files\\nodejs;C:\\Windows\\System32",
+      SYSTEMROOT: "C:\\Windows", PATHEXT: ".COM;.EXE;.BAT;.CMD", ComSpec: "C:\\Windows\\System32\\cmd.exe",
+      USERPROFILE: "C:\\Users\\Presenter", TEMP: "C:\\Temp", ANTHROPIC_API_KEY: "not-forwarded", CONVEX_DEPLOY_KEY: "not-forwarded",
+    }, {}, "win32");
+    expect(env.PATH).toBe("C:\\Program Files\\nodejs;C:\\Windows\\System32");
+    expect(env.Path).toBeUndefined();
+    expect(env.SystemRoot).toBe("C:\\Windows");
+    expect(env.PATHEXT).toBe(".COM;.EXE;.BAT;.CMD");
+    expect(env.ComSpec).toEndWith("cmd.exe");
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.CONVEX_DEPLOY_KEY).toBeUndefined();
+    expect(env.NO_PROXY).toContain("127.0.0.1");
+  });
+
+  test("POSIX preserves case-sensitive environment behavior", () => {
+    expect(childEnv({ Path: "/wrong", PATH: "/bin", SYSTEMROOT: "ignored" }, {}, "linux").PATH).toBe("/bin");
+    expect(childEnv({ Path: "/wrong" }, {}, "linux").PATH).toBeUndefined();
   });
 });

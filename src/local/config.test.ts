@@ -3,9 +3,10 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { childEnv } from "./isolation";
 
 const root = join(import.meta.dir, "../..");
-const base = { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "" };
+const base = childEnv(process.env, {});
 
 function run(args: string[], env: Record<string, string>) {
   const p = Bun.spawnSync(["bun", "--no-env-file", ...args], { cwd: root, env: { ...base, ...env }, stdout: "pipe", stderr: "pipe", timeout: 60_000 });

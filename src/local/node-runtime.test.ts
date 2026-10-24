@@ -35,4 +35,26 @@ describe("Node.js for the local Convex backend", () => {
     expect(() => findConvexNode(probe("linux", { "/usr/bin/node": "v26.0.0" }, { path: "/usr/bin/node" }))).toThrow(/PATH has v26\.0\.0.*nvm install 24.*WAREORB_CONVEX_NODE/);
     expect(() => findConvexNode(probe("darwin", {}))).toThrow(/brew install node@24/);
   });
+
+  test("Windows: uses node.exe from PATH, including a path containing spaces", () => {
+    const bin = "C:\\Program Files\\nodejs\\node.exe";
+    expect(findConvexNode(probe("win32", { [bin]: "v24.10.0" }, { path: bin }))).toBe("C:\\Program Files\\nodejs");
+  });
+
+  test("Windows: accepts an explicit node.exe or its directory", () => {
+    const bin = "D:\\Tools\\Node 24\\node.exe";
+    for (const selected of [bin, "D:\\Tools\\Node 24"]) {
+      expect(findConvexNode(probe("win32", { [bin]: "v24.10.0" }, {
+        env: { WAREORB_CONVEX_NODE: selected }, dirs: { "D:\\Tools\\Node 24": [] },
+      }))).toBe("D:\\Tools\\Node 24");
+    }
+  });
+
+  test("Windows: finds the supported installation after an unsupported PATH version", () => {
+    const current = "C:\\Tools\\node\\node.exe";
+    const supported = "C:\\Program Files\\nodejs\\node.exe";
+    expect(findConvexNode(probe("win32", { [current]: "v26.0.0", [supported]: "v24.10.0" }, {
+      path: current, env: { ProgramFiles: "C:\\Program Files" },
+    }))).toBe("C:\\Program Files\\nodejs");
+  });
 });

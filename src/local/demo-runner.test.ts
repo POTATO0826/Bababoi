@@ -2,7 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { DemoError, runDemo, type DemoDeps } from "./demo-runner";
-import { IsolationError } from "./isolation";
+import { childEnv, IsolationError } from "./isolation";
 
 const LOCAL_ENV = "CONVEX_DEPLOYMENT=anonymous:anonymous-agent\nCONVEX_URL=http://127.0.0.1:3210\nCONVEX_SITE_URL=http://127.0.0.1:3211\n";
 
@@ -28,6 +28,7 @@ function harness(opts: {
   skus?: unknown[];
   busyPorts?: number[];
   node?: () => string;
+  platform?: NodeJS.Platform;
 } = {}): Harness {
   const files = new Map(Object.entries(opts.files ?? {}));
   const h: Harness = {
@@ -36,8 +37,9 @@ function harness(opts: {
     deps: undefined as unknown as DemoDeps,
   };
   h.deps = {
+    platform: opts.platform,
     root: "/demo",
-    ambient: { PATH: "/usr/bin", HOME: "/home/presenter", ...opts.ambient },
+    ambient: { ...childEnv(process.env, {}), PATH: process.env.PATH ?? process.env.Path ?? "/usr/bin", HOME: process.env.HOME ?? "/home/presenter", ...opts.ambient },
     argv: opts.argv ?? [],
     read: (f) => files.get(f) ?? null,
     writePrivate: (f, text) => { h.writes.push(f); files.set(f, text); },
@@ -112,6 +114,14 @@ describe("cloud selectors and URLs stop the demo before any write or request", (
 });
 
 describe("a clean start", () => {
+  test("Windows puts the selected Node directory first using semicolons and retains executable lookup", async () => {
+    const h = harness({ platform: "win32", node: () => "C:\\Program Files\\nodejs", ambient: {
+      PATH: "C:\\Tools\\bun;C:\\Windows\\System32", SystemRoot: "C:\\Windows", PATHEXT: ".EXE;.CMD",
+    } });
+    await runDemo(h.deps);
+    expect(h.runs.every((r) => r.env.PATH === "C:\\Program Files\\nodejs;C:\\Tools\\bun;C:\\Windows\\System32")).toBe(true);
+    expect(h.starts.at(-1)!.env.PATHEXT).toBe(".EXE;.CMD");
+  });
   test("the real frontend bundle has no unresolved public environment references without Clerk", async () => {
     const h = harness();
     await runDemo(h.deps);
@@ -136,7 +146,7 @@ describe("a clean start", () => {
     for (const r of [...h.runs, ...h.starts]) {
       for (const key of ["CONVEX_DEPLOY_KEY", "CONVEX_DEPLOYMENT", "CONVEX_SELF_HOSTED_URL", "CLERK_SECRET_KEY"]) expect(r.env[key]).toBeUndefined();
     }
-    expect(h.runs.every((r) => r.env.CONVEX_AGENT_MODE === "anonymous" && r.env.PATH!.startsWith("/opt/node22/bin:"))).toBe(true);
+    expect(h.runs.every((r) => r.env.CONVEX_AGENT_MODE === "anonymous" && r.env.PATH!.startsWith(`/opt/node22/bin${process.platform === "win32" ? ";" : ":"}`))).toBe(true);
     expect(h.fetches.length).toBeGreaterThan(0);
     expect(h.fetches.every((f) => f.url.startsWith("http://127.0.0.1:3210/api/"))).toBe(true);
     const web = h.starts.find((s) => s.cmd.includes("src/index.ts"))!;

@@ -25,7 +25,7 @@ const PASS_THROUGH = new Set([
   // Needed on networks that route downloads (e.g. the one-time local backend binary) through a proxy.
   "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy", "SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS",
   // Windows equivalents of HOME/TMP.
-  "USERPROFILE", "LOCALAPPDATA", "APPDATA", "SystemRoot",
+  "USERPROFILE", "LOCALAPPDATA", "APPDATA", "SystemRoot", "WINDIR", "PATHEXT", "ComSpec",
 ]);
 
 export interface DemoPorts {
@@ -57,6 +57,7 @@ export function demoPorts(env: Record<string, string | undefined>): DemoPorts {
   const web = read("WAREORB_DEMO_PORT", 3000);
   const convex = read("WAREORB_CONVEX_PORT", 3210);
   const convexSite = read("WAREORB_CONVEX_SITE_PORT", convex + 1);
+  if (!isPort(convexSite)) throw new IsolationError(["WAREORB_CONVEX_SITE_PORT must be from 1024 to 65535; set it explicitly when the Convex port is 65535"]);
   if (new Set([web, convex, convexSite]).size !== 3) throw new IsolationError([`Ports must differ (web ${web}, Convex ${convex}, Convex site ${convexSite})`]);
   return { web, convex, convexSite };
 }
@@ -86,13 +87,14 @@ export function loopbackUrl(value: string | undefined, name: string, port?: numb
 /** Parse a dotenv file the way the Convex CLI does for the keys that matter here. */
 export function parseEnvFile(text: string | null): Map<string, string> {
   const values = new Map<string, string>();
-  for (const line of (text ?? "").split(/\r?\n/)) {
-    const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
-    if (!m) continue;
-    let v = m[2]!;
-    if (/^'.*'$/.test(v) || /^".*"$/.test(v)) v = v.slice(1, -1);
-    else v = v.replace(/\s+#.*$/, "");
-    values.set(m[1]!, v);
+  // Match the dotenv 16 assignment grammar used by Convex, including colon syntax and multiline quotes.
+  const assignment = /^\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)(\s*'(?:\\'|[^'])*'|\s*"(?:\\"|[^"])*"|\s*`(?:\\`|[^`])*`|[^#\r\n]+)?\s*(?:#.*)?$/gm;
+  for (const m of (text ?? "").replace(/\r\n?/g, "\n").matchAll(assignment)) {
+    let value = (m[2] ?? "").trim();
+    const quote = value[0];
+    if (["'", '"', "`"].includes(quote ?? "") && value.endsWith(quote!)) value = value.slice(1, -1);
+    if (quote === '"') value = value.replace(/\\n/g, "\n").replace(/\\r/g, "\r");
+    values.set(m[1]!, value);
   }
   return values;
 }
@@ -120,22 +122,19 @@ export interface PreflightResult {
  */
 export function preflight(input: PreflightInput): PreflightResult {
   const problems: string[] = [];
+  // Check each spelling independently: a lowercase empty value must not hide an uppercase cloud key.
   const files = [[".env.local", parseEnvFile(input.envLocal)], [".env", parseEnvFile(input.dotEnv)]] as const;
   for (const [file, values] of files) {
-    for (const key of CLOUD_SELECTORS) if (values.get(key)) problems.push(`${file} sets ${key}, which points the Convex CLI at a cloud or self-hosted deployment. Move that file aside or use a separate checkout for the demo.`);
-    const deployment = values.get("CONVEX_DEPLOYMENT");
+    for (const [spelling, value] of values) {
+    const key = spelling.toUpperCase();
+    if ((CLOUD_SELECTORS as readonly string[]).includes(key) && value) problems.push(`${file} sets ${key}, which points the Convex CLI at a cloud or self-hosted deployment. Move that file aside or use a separate checkout for the demo.`);
+    const deployment = key === "CONVEX_DEPLOYMENT" ? value : null;
     if (deployment && !LOCAL_DEPLOYMENT.test(deployment)) problems.push(`${file} selects CONVEX_DEPLOYMENT=${deployment.split(":")[0]}:…, not the accountless local deployment (anonymous:…). Move that file aside or use a separate checkout for the demo.`);
+    const port = key === "CONVEX_URL" ? input.ports.convex : key === "CONVEX_SITE_URL" ? input.ports.convexSite : null;
+    if (value && port !== null) try { loopbackUrl(value, `${file} ${key}`, port); } catch (e) { problems.push(...(e as IsolationError).problems); }
+    }
   }
   const local = files[0][1];
-  for (const [key, port] of [["CONVEX_URL", input.ports.convex], ["CONVEX_SITE_URL", input.ports.convexSite]] as const) {
-    const value = local.get(key);
-    if (!value) continue;
-    try { loopbackUrl(value, `.env.local ${key}`, port); } catch (e) { problems.push(...(e as IsolationError).problems); }
-  }
-  for (const [key, port] of [["CONVEX_URL", input.ports.convex], ["CONVEX_SITE_URL", input.ports.convexSite]] as const) {
-    const value = files[1][1].get(key);
-    if (value) try { loopbackUrl(value, `.env ${key}`, port); } catch (e) { problems.push(...(e as IsolationError).problems); }
-  }
   if (problems.length) throw new IsolationError(problems);
   const droppedAmbient = CLOUD_SELECTORS.filter((k) => input.ambient[k]?.trim());
   const deployment = local.get("CONVEX_DEPLOYMENT") ?? null;
@@ -143,14 +142,21 @@ export function preflight(input: PreflightInput): PreflightResult {
 }
 
 /** A child-process environment built from an allowlist, so no ambient selector or secret leaks in. */
-export function childEnv(ambient: Record<string, string | undefined>, extra: Record<string, string>): Record<string, string> {
+export function childEnv(ambient: Record<string, string | undefined>, extra: Record<string, string>, platform: string = process.platform): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(ambient)) if (v !== undefined && PASS_THROUGH.has(k)) env[k] = v;
+  const windowsNames = new Map<string, string>();
+  for (const name of PASS_THROUGH) if (!windowsNames.has(name.toLowerCase())) windowsNames.set(name.toLowerCase(), name);
+  const nameOf = (key: string) => platform === "win32" ? windowsNames.get(key.toLowerCase()) : PASS_THROUGH.has(key) ? key : undefined;
+  for (const [k, v] of Object.entries(ambient)) {
+    const name = nameOf(k);
+    if (v !== undefined && name && (env[name] === undefined || k === name)) env[name] = v;
+  }
   // Loopback traffic must never go through a proxy.
   const noProxy = [env.NO_PROXY ?? env.no_proxy, "127.0.0.1", "localhost"].filter(Boolean).join(",");
   env.NO_PROXY = noProxy;
-  env.no_proxy = noProxy;
-  return { ...env, ...extra };
+  if (platform !== "win32") env.no_proxy = noProxy;
+  for (const [k, v] of Object.entries(extra)) env[nameOf(k) ?? k] = v;
+  return env;
 }
 
 /** The settings the demo itself needs after the CLI has created the local deployment. */

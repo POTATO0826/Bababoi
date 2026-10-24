@@ -35,7 +35,16 @@ const deps: DemoDeps = {
       out = openSync(at(log), "a", 0o600);
     }
     const p = Bun.spawn(cmd, { cwd: root, env, stdin: "ignore", stdout: out, stderr: out });
-    return { kill: () => p.kill(), exited: p.exited };
+    return {
+      kill: () => {
+        if (p.exitCode !== null) return;
+        // Convex owns a backend child process; Windows needs explicit process-tree cleanup.
+        if (process.platform === "win32") Bun.spawnSync(["taskkill", "/PID", String(p.pid), "/T", "/F"], { stdout: "ignore", stderr: "ignore" });
+        // Convex registers its backend cleanup on SIGINT (SIGTERM bypasses that cleanup).
+        else p.kill("SIGINT");
+      },
+      exited: p.exited,
+    };
   },
   fetch: (url, init) => fetch(url, init),
   portFree: (port) => new Promise((resolve) => {
@@ -77,8 +86,9 @@ try {
     const quit = () => { demo.stop(); process.exit(0); };
     process.on("SIGINT", quit);
     process.on("SIGTERM", quit);
-    await demo.web;
+    const code = await demo.web;
     demo.stop();
+    if (code !== 0) process.exit(code);
   }
 } catch (e) {
   console.error(`[demo] ${e instanceof IsolationError || e instanceof DemoError || e instanceof Error ? e.message : String(e)}`);
