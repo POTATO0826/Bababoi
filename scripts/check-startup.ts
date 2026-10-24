@@ -25,8 +25,9 @@ try {
 } finally {
   if (process.platform === "win32") {
     // Detached Convex action executors may outlive the CLI tree and retain a directory handle.
-    const detached = Bun.spawn(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", join(root, "scripts", "stop-startup-fixture.ps1")], { cwd: root, env: { ...env, WAREORB_SMOKE_DIR: scratch }, stdin: "ignore", stdout: "inherit", stderr: "inherit" });
-    const inspectTimer = setTimeout(() => detached.kill(), 15000);
+    const powershell = Bun.which("pwsh") ?? "powershell.exe";
+    const detached = Bun.spawn([powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", join(root, "scripts", "stop-startup-fixture.ps1")], { cwd: root, env: { ...env, WAREORB_SMOKE_DIR: scratch }, stdin: "ignore", stdout: "inherit", stderr: "inherit" });
+    const inspectTimer = setTimeout(() => detached.kill(), 60000);
     try { assert.equal(await detached.exited, 0, "Could not inspect remaining fixture processes"); }
     finally { clearTimeout(inspectTimer); }
   }

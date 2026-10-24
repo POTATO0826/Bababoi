@@ -6,7 +6,8 @@ if (!$fixtureRoot -or [IO.Path]::GetDirectoryName($fixtureRoot) -ine $expectedPa
   throw 'Refusing a path outside the generated startup fixture'
 }
 $fixtureRoot = $fixtureRoot.Replace([char]47, [char]92).TrimEnd([char]92) + [char]92
-$ownedProcesses = @(Get-CimInstance Win32_Process | Where-Object {
+Write-Host '[startup] Inspecting test-owned Windows runtime processes'
+$ownedProcesses = @(Get-CimInstance -ClassName Win32_Process -Filter "Name='node.exe' OR Name='bun.exe' OR Name='convex-local-backend.exe'" -Property Name,ProcessId,CommandLine -OperationTimeoutSec 10 | Where-Object {
   $_.Name -in @('node.exe', 'bun.exe', 'convex-local-backend.exe') -and
   $_.CommandLine -and
   $_.CommandLine.Replace([char]47, [char]92).IndexOf($fixtureRoot, [StringComparison]::OrdinalIgnoreCase) -ge 0
