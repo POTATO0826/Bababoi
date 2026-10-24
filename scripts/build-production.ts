@@ -1,4 +1,8 @@
 // Used by the hosting build after Convex supplies its deployed URL.
+// The login-free local presentation mode can never be part of a release build.
+for (const name of ["BUN_PUBLIC_WAREORB_LOCAL_DEMO", "WAREORB_LOCAL_DEMO", "WAREORB_LOCAL_DEMO_PRIVATE_JWK", "WAREORB_LOCAL_AGENT_SECRET"] as const) {
+  if (process.env[name]) throw new Error(`${name} is set: local demo mode is never allowed in a production build. Unset it (it belongs only to \`bun run demo\`).`);
+}
 const required = ["BUN_PUBLIC_CONVEX_URL", "BUN_PUBLIC_CONVEX_SITE_URL", "BUN_PUBLIC_CLERK_PUBLISHABLE_KEY"] as const;
 for (const name of required) {
   if (!process.env[name]?.trim()) throw new Error(`Missing ${name}. Configure hosting before building a release.`);

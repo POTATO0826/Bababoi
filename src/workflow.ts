@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { flagBatches, type BatchFlag } from "@/domain/ageing";
 import { OPEN_DEAL } from "@/domain/deal";
-import { historyStart, replenishmentRows, type ReplenishRow } from "@/domain/replenish";
+import { historyStart, replenishmentPlan, type ReplenishPlan, type ReplenishRow } from "@/domain/replenish";
 import { DAY, type Role } from "@/domain/types";
 import type { Deal } from "@/ledger";
 import { useWare, type Snapshot, type Stage } from "@/store";
@@ -53,17 +53,27 @@ export function useFlags() {
   return useMemo(() => flagsOf(ledger, now), [ledger, now]);
 }
 
-export type { ReplenishRow };
+export type { ReplenishPlan, ReplenishRow };
 
+/** The jointly feasible replenishment plan (same rule and allocation as the local agent's analyze_reorder). */
+export function planOf(ledger: Snapshot | null, now: number): ReplenishPlan | null {
+  return ledger ? replenishmentPlan(ledger, now) : null;
+}
+
+/** Recommended orders in allocation order; their quantities fit the shared budget and bays together. */
 export function suggestionsOf(ledger: Snapshot | null, now: number): ReplenishRow[] {
-  if (!ledger) return [];
-  return replenishmentRows(ledger, now).filter((r) => r.s.status === "ok" && r.s.suggested > 0).sort((a, b) => b.netSales - a.netSales);
+  return (planOf(ledger, now)?.rows ?? []).filter((r) => r.s.status === "ok" && r.s.suggested > 0).sort((a, b) => (a.priority ?? 1e9) - (b.priority ?? 1e9));
+}
+
+export function usePlan() {
+  const ledger = useWare((s) => s.ledger);
+  const now = useNow();
+  return useMemo(() => planOf(ledger, now), [ledger, now]);
 }
 
 export function useSuggestions() {
-  const ledger = useWare((s) => s.ledger);
-  const now = useNow();
-  return useMemo(() => suggestionsOf(ledger, now), [ledger, now]);
+  const plan = usePlan();
+  return useMemo(() => (plan?.rows ?? []).filter((r) => r.s.status === "ok" && r.s.suggested > 0).sort((a, b) => (a.priority ?? 1e9) - (b.priority ?? 1e9)), [plan]);
 }
 
 /** Work waiting for the current role, per command (palette badges). */

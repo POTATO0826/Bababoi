@@ -112,9 +112,10 @@ export function recordUtterance(opts: { maxMs?: number; silenceMs?: number; lang
 }
 
 /** Speech → text: Fish ASR on the server; the browser's transcript if Fish is unavailable. */
-export async function transcribe(u: Utterance, lang: Lang, opts: { keep?: boolean } = {}): Promise<{ text: string; storageId?: Id<"_storage">; via: "fish" | "browser" }> {
+export async function transcribe(u: Utterance, lang: Lang, opts: { keep?: boolean; browserOnly?: boolean } = {}): Promise<{ text: string; storageId?: Id<"_storage">; via: "fish" | "browser" }> {
   const fallback = u.browserText.trim();
-  if (u.blob) {
+  // Local demo: the browser's own speech recognition is the only transcription path.
+  if (u.blob && !opts.browserOnly) {
     try {
       const auth = await authHeaders();
       if (!auth) return { text: fallback, via: "browser" };

@@ -43,3 +43,13 @@ describe("receiving voice evidence when transcription is unavailable", () => {
     expect(request).not.toHaveBeenCalled();
   });
 });
+
+describe("local demo uses browser speech only", () => {
+  test("never sends audio to a speech provider when browserOnly is set", async () => {
+    setAuthTokenProvider(async () => "unit-test-token");
+    const request = mock(async () => Response.json({ text: "provider text" }));
+    globalThis.fetch = request as unknown as typeof fetch;
+    expect(await transcribe({ blob: new Blob(["audio"], { type: "audio/webm" }), browserText: " Chrome heard this " }, "en", { browserOnly: true })).toEqual({ text: "Chrome heard this", via: "browser" });
+    expect(request).not.toHaveBeenCalled();
+  });
+});

@@ -15,6 +15,12 @@ function expectVersion(r: { version?: number }, expectedVersion: number) {
   if (!Number.isSafeInteger(expectedVersion) || expectedVersion !== versionOf(r)) fail("Receipt changed — refresh and try again");
 }
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+/** Browser recordings (MediaRecorder: webm/opus in Chrome, mp4/aac in Safari) and common audio files. */
+const AUDIO_TYPES = new Set(["audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/aac", "audio/wav", "audio/x-wav", "audio/wave"]);
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
+/** "audio/webm;codecs=opus" → "audio/webm". */
+const baseType = (t: string | undefined) => t?.split(";")[0]!.trim().toLowerCase() || undefined;
 const clean = (s: string) => s.trim().replace(/\s+/g, " ");
 const documentKey = (supplier?: string, docRef?: string) => {
   const ref = docRef && clean(docRef).toUpperCase();
@@ -100,13 +106,22 @@ export const addEvidence = mutation({
     if (kind === "photo" || kind === "document") {
       if (!storageId) fail("Upload a file before attaching it");
       const metadata = await ctx.db.system.get("_storage", storageId);
-      if (!metadata || metadata.size <= 0 || metadata.size > 20 * 1024 * 1024) fail("Evidence file must exist and be no larger than 20 MB");
+      if (!metadata || metadata.size <= 0 || metadata.size > MAX_FILE_BYTES) fail("Evidence file must exist and be no larger than 20 MB");
       mediaType = metadata.contentType;
       if (!mediaType || (!IMAGE_TYPES.has(mediaType) && !(kind === "document" && mediaType === "application/pdf"))) fail("Attach a supported image or PDF document");
       if (mime && mime !== mediaType) fail("Evidence file type does not match the upload");
+    } else if (kind === "voice") {
+      // The original recording is the evidence; the transcript is optional (speech recognition may be unavailable).
+      if (!storageId) fail("A voice note needs its recording; save a transcript without audio as a typed note");
+      const metadata = await ctx.db.system.get("_storage", storageId);
+      if (!metadata || metadata.size <= 0 || metadata.size > MAX_AUDIO_BYTES) fail("Voice recording must exist and be no larger than 10 MB");
+      mediaType = metadata.contentType;
+      if (!AUDIO_TYPES.has(baseType(mediaType) ?? "")) fail("Attach a supported audio recording (webm, ogg, mp4, mpeg or wav)");
+      if (mime && baseType(mime) !== baseType(mediaType)) fail("Evidence file type does not match the upload");
     } else {
       if (storageId || !note) fail("Enter the note or voice transcript");
     }
+    if (storageId && r.evidence.some((e) => e.storageId === storageId)) fail("This file is already attached");
     await ctx.db.patch("receipts", receiptId, {
       version: versionOf(r) + 1,
       ...(r.extraction.status === "running" ? { extraction: { status: "idle" as const } } : {}),
@@ -208,6 +223,7 @@ export const post = mutation({
     for (const line of r.lines) {
       if (!line.skuCode || !line.qty || line.qty <= 0 || !Number.isSafeInteger(line.qty)) fail(`Resolve "${line.rawText}"`);
       if (!line.verified) fail(`Count "${line.rawText}"`);
+      if (!line.condition.trim()) fail(`Confirm the physical condition of "${line.rawText}" before posting`);
       if (line.condition.trim().toLowerCase() !== "good") fail(`Resolve condition for "${line.rawText}" before adding sellable stock`);
       const sku = (await skuByCode(ctx, line.skuCode)) ?? fail(`Unknown SKU ${line.skuCode}`);
       const locations = line.locations ?? [];
@@ -390,8 +406,8 @@ export const setExtraction = internalMutation({
       qty: l.qty != null && Number.isSafeInteger(l.qty) && l.qty > 0 ? l.qty : null,
       candidates: l.candidates.filter((c) => known.has(c)).slice(0, 4),
       questions: [...l.questions.slice(0, 4).map(q => q.slice(0, 160)), ...(l.skuCode && !known.has(l.skuCode) ? ["Not in catalogue"] : [])],
-      // Staff confirm the physical condition before posting; a stated problem is kept for them to see.
-      condition: clean(l.condition || "good").slice(0, 60) || "good",
+      // Only a stated condition is kept; unstated stays empty until staff confirm it before posting.
+      condition: clean(l.condition).slice(0, 60),
       confidence: Number.isFinite(l.confidence) ? Math.max(0, Math.min(1, l.confidence)) : 0,
       verified: false,
       source: "ai" as const,

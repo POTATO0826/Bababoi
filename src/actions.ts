@@ -15,7 +15,9 @@ import {
   type ZoneId,
 } from "@/data/catalog";
 import { SLOT_BY_ID } from "@/data/layout";
-import { actorNow, getInventory, getWare, setWare, type ViewMode } from "@/store";
+import { localDemo } from "@/identity";
+import { fetchAgentStatus, streamAgentChat } from "@/local/agent-client";
+import { actorNow, getInventory, getWare, setWare, type AgentTurn, type TranscriptLine, type ViewMode } from "@/store";
 import { scanToReceipt } from "@/scan";
 import { recordUtterance, say, stopSpeaking, transcribe } from "@/voice/voice";
 
@@ -141,9 +143,14 @@ function pushLine(who: "ai" | "user", text: string, traces?: string[]) {
 }
 
 export function speak(text: string, traces?: string[]) {
-  const my = session;
   pushLine("ai", text, traces);
-  if (!voiceOn() || !getWare().settings.voiceReplies) {
+  voiceReply(text);
+}
+
+/** Speak a reply that is already in the transcript (or just go back to listening). */
+function voiceReply(text: string) {
+  const my = session;
+  if (!voiceOn() || !getWare().settings.voiceReplies || !text.trim()) {
     setWare({ orb: voiceOn() ? "listening" : "idle" });
     if (voiceOn()) void listen();
     return;
@@ -174,7 +181,7 @@ async function listen() {
     return;
   }
   setWare({ orb: "thinking", interim: "…" });
-  const t = await transcribe(u, getWare().lang);
+  const t = await transcribe(u, getWare().lang, { browserOnly: localDemo });
   if (my !== session) return;
   setWare({ interim: "" });
   if (!t.text) {
@@ -193,6 +200,7 @@ function stopListening() {
 /** Open the Jarvis chat. `voice` starts listening; `draft` pre-fills the input (e.g. "/"). */
 export function openAgent(opts: { voice?: boolean; draft?: string } = {}) {
   const voice = opts.voice ?? false;
+  if (localDemo) void refreshLocalAgent();
   setWare((s) => ({
     agentOpen: true,
     panelOpen: false,
@@ -206,6 +214,7 @@ export function openAgent(opts: { voice?: boolean; draft?: string } = {}) {
 
 export function closeAgent() {
   session++;
+  stopLocalAgent();
   stopListening();
   stopSpeaking();
   setWare({ agentOpen: false, orb: "idle", interim: "", muted: true });
@@ -290,12 +299,19 @@ export async function runCommand(text: string) {
   stopListening();
   stopSpeaking();
   setWare({ agentOpen: true, interim: "" });
+  stopLocalAgent();
   pushLine("user", t);
   if (t.startsWith("/")) {
     slashCommand(t);
     return;
   }
   setWare({ orb: "thinking" });
+  // Local demo: free text goes only to the Pi warehouse analyst. If it is not connected, the reply
+  // says so and how to fix it; there is no scripted stand-in.
+  if (localDemo) {
+    await askLocalAgent(t, my);
+    return;
+  }
   if (!forceOffline) {
     const s = getWare();
     try {
@@ -317,6 +333,97 @@ export async function runCommand(text: string) {
     }
   }
   if (my === session) answerOffline(t.toLowerCase());
+}
+
+// ── Local Pi agent (local demo mode) ──────────────────────────────────────
+
+let agentSessionId = crypto.randomUUID();
+let agentRun: { abort: AbortController; done: Promise<void> } | null = null;
+
+/** Ask the local agent service what is configured (no provider call). */
+export async function refreshLocalAgent() {
+  const st = await fetchAgentStatus();
+  setWare({ localAgent: { ...st, checkedAt: Date.now() } });
+}
+
+/** Stop the answer in progress, if any (Stop button, a new question, closing Jarvis). */
+export function stopLocalAgent() {
+  agentRun?.abort.abort();
+}
+
+export const localAgentBusy = () => agentRun !== null;
+
+/** Start a fresh agent conversation (the server forgets nothing; this tab simply uses a new session). */
+export function newAgentConversation() {
+  stopLocalAgent();
+  agentSessionId = crypto.randomUUID();
+  setWare({ transcript: [], orb: "idle", interim: "" });
+}
+
+function updateLine(id: number, f: (l: TranscriptLine) => TranscriptLine) {
+  setWare((s) => ({ transcript: s.transcript.map((l) => (l.id === id ? f(l) : l)) }));
+}
+const withTurn = (l: TranscriptLine, patch: (a: AgentTurn) => Partial<AgentTurn>): TranscriptLine => {
+  const agent = l.agent ?? { state: "streaming", tools: [] };
+  return { ...l, agent: { ...agent, ...patch(agent) } };
+};
+
+async function askLocalAgent(text: string, my: number) {
+  const previous = agentRun;
+  if (previous) {
+    previous.abort.abort();
+    await Promise.race([previous.done, new Promise((r) => setTimeout(r, 3000))]);
+  }
+  const id = ++lineId;
+  setWare((s) => ({ transcript: [...s.transcript, { id, who: "ai" as const, text: "", agent: { state: "streaming" as const, tools: [] } }].slice(-40) }));
+  const abort = new AbortController();
+  let finish = () => {};
+  const done = new Promise<void>((r) => (finish = r));
+  agentRun = { abort, done };
+  let finalText = "";
+  try {
+    const outcome = await streamAgentChat({ sessionId: agentSessionId, text, signal: abort.signal }, (e) => {
+      switch (e.type) {
+        case "status":
+          updateLine(id, (l) => withTurn(l, () => ({ model: e.model, subscription: e.subscription })));
+          setWare((s) => ({ localAgent: { ...(s.localAgent ?? {}), ready: true, provider: e.provider, model: e.model.slice(e.provider.length + 1), modelName: e.modelName, subscription: e.subscription, reason: undefined, checkedAt: Date.now() } }));
+          break;
+        case "text":
+          updateLine(id, (l) => ({ ...l, text: l.text + e.delta }));
+          break;
+        case "tool_start":
+          updateLine(id, (l) => withTurn(l, (a) => ({ tools: [...a.tools, { id: e.id, name: e.name, args: e.args, state: "running" }] })));
+          break;
+        case "tool_end":
+          updateLine(id, (l) => withTurn(l, (a) => {
+            const end = { state: e.isError ? "error" as const : "done" as const, result: e.result, ms: e.ms };
+            return { tools: a.tools.some((t) => t.id === e.id) ? a.tools.map((t) => (t.id === e.id ? { ...t, ...end } : t)) : [...a.tools, { id: e.id, name: e.name, args: null, ...end }] };
+          }));
+          break;
+        case "done":
+          finalText = e.text;
+          updateLine(id, (l) => withTurn({ ...l, text: l.text.trim() ? l.text : e.text }, () => ({ state: "done" })));
+          break;
+        case "error":
+          updateLine(id, (l) => withTurn(l, (a) => ({ state: "error", error: e.message, setup: e.setup, tools: a.tools.map((t) => (t.state === "running" ? { ...t, state: "error" as const } : t)) })));
+          if (e.setup) setWare((s) => ({ localAgent: { ...(s.localAgent ?? {}), ready: false, reason: e.message, checkedAt: Date.now() } }));
+          break;
+        case "cancelled":
+          updateLine(id, (l) => withTurn(l, (a) => ({ state: "cancelled", tools: a.tools.map((t) => (t.state === "running" ? { ...t, state: "error" as const } : t)) })));
+          break;
+      }
+    });
+    if (my !== session) return;
+    if (outcome === "done") voiceReply(finalText || (getWare().transcript.find((l) => l.id === id)?.text ?? ""));
+    else {
+      setWare({ orb: voiceOn() ? "listening" : "idle" });
+      if (voiceOn()) void listen();
+    }
+  } finally {
+    finish();
+    if (agentRun?.abort === abort) agentRun = null;
+    if (my === session && getWare().orb === "thinking") setWare({ orb: "idle" });
+  }
 }
 
 const CATEGORY_WORDS: [RegExp, CategoryId][] = [

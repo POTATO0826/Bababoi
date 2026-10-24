@@ -10,6 +10,11 @@ dist
 coverage
 *.lcov
 
+# local demo: local Convex database, generated keys, backend logs (never commit)
+.convex/
+*.log
+.pi/
+
 # logs
 logs
 _.log

@@ -13,12 +13,47 @@ export type Lang = "auto" | "en" | "zh";
 export type Snapshot = NonNullable<FunctionReturnType<typeof api.ledger.snapshot>>;
 export type Detail = { kind: "deal" | "receipt" | "batch"; id: string } | null;
 
+/** One tool call the local Pi agent made while answering (local demo mode). */
+export interface AgentToolCall {
+  id: string;
+  name: string;
+  args: unknown;
+  state: "running" | "done" | "error";
+  result?: unknown;
+  ms?: number;
+}
+
+export interface AgentTurn {
+  state: "streaming" | "done" | "error" | "cancelled";
+  /** provider/model that answered, from the server. */
+  model?: string;
+  subscription?: boolean;
+  tools: AgentToolCall[];
+  error?: string;
+  /** The error is a missing/invalid provider login (operator setup). */
+  setup?: boolean;
+}
+
 export interface TranscriptLine {
   id: number;
   who: "ai" | "user";
   text: string;
   /** What Jarvis did on screen for this reply ("Opened Ageing"). */
   traces?: string[];
+  /** Present when the local Pi agent produced this reply. */
+  agent?: AgentTurn;
+}
+
+/** Local demo: what the Pi agent service reports (null until checked; never present in production). */
+export interface LocalAgentState {
+  ready: boolean;
+  provider?: string;
+  model?: string;
+  modelName?: string;
+  subscription?: boolean;
+  readsPhotos?: boolean;
+  reason?: string;
+  checkedAt: number;
 }
 
 export interface Settings {
@@ -81,6 +116,7 @@ export interface WareState {
   orb: OrbState;
   transcript: TranscriptLine[];
   micError: string | null;
+  localAgent: LocalAgentState | null;
 
   settings: Settings;
 }
@@ -139,6 +175,7 @@ export const useWare = create<WareState>()(() => ({
   orb: "idle",
   transcript: [],
   micError: null,
+  localAgent: null,
 
   settings: readSettings(),
 }));

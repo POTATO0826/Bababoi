@@ -12,9 +12,23 @@ import { useWare } from "./store";
 const elem = document.getElementById("root")!;
 const clerkKey = process.env.BUN_PUBLIC_CLERK_PUBLISHABLE_KEY;
 const convexUrl = process.env.BUN_PUBLIC_CONVEX_URL;
+/** Local demo pages only ever run on this computer against its own backend. */
+const demoProblem = localDemo
+  ? !["127.0.0.1", "localhost"].includes(location.hostname) ? `This login-free presentation page must be opened at http://127.0.0.1, not ${location.hostname}.`
+    : !convexUrl || !/^http:\/\/127\.0\.0\.1:\d+$/.test(convexUrl) ? "The presentation page is not connected to this computer's local backend. Start it with `bun run demo`."
+    : null
+  : null;
+
 const app = (
   <StrictMode>
-    {localDemo && convexUrl ? (
+    {demoProblem ? (
+      <main className="flex min-h-screen items-center justify-center bg-background p-6">
+        <section className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl">
+          <h1 className="text-xl font-semibold">Local demo refused</h1>
+          <p className="mt-3 text-sm text-muted-foreground">{demoProblem}</p>
+        </section>
+      </main>
+    ) : localDemo && convexUrl ? (
       <ConvexProviderWithAuth client={convex} useAuth={useDemoConvexAuth}>
         <DemoIdentity>
           <App />

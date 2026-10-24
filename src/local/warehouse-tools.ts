@@ -6,7 +6,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { api } from "../../convex/_generated/api";
 import { SLOT_BY_ID } from "../data/layout";
 import { netSalesBySku } from "../domain/ageing";
-import { historyStart, replenishmentRows } from "../domain/replenish";
+import { historyStart, replenishmentPlan } from "../domain/replenish";
 import { batchQty, freeSlotSet, slotCode } from "../domain/stock";
 import { DAY } from "../domain/types";
 
@@ -65,52 +65,71 @@ export function movementsView(s: Snapshot, p: { sku?: string; days?: number; kin
 export function purchaseOrdersView(s: Snapshot) {
   const orders = s.purchaseOrders.map((o) => {
     const sku = s.skus.find((k) => k.code === o.skuCode);
-    const unitCostSen = o.unitCostSen ?? sku?.price.unitCostSen ?? 0;
+    const own = typeof o.unitCostSen === "number" && o.unitCostSen > 0 ? o.unitCostSen : null;
+    const catalogue = sku && sku.price.unitCostSen > 0 ? sku.price.unitCostSen : null;
+    const unitCostSen = own ?? catalogue;
+    const outstanding = Math.max(0, o.qty - o.qtyReceived);
     return {
-      po: o.code, sku: o.skuCode, ordered: o.qty, received: o.qtyReceived, outstanding: o.qty - o.qtyReceived,
-      supplier: o.supplier ?? null, supplierReference: o.orderRef ?? null, unitCostRM: rm(unitCostSen),
-      outstandingValueRM: rm((o.qty - o.qtyReceived) * unitCostSen), confirmedAt: o.confirmedAt ? new Date(o.confirmedAt).toISOString().slice(0, 10) : null,
+      po: o.code, sku: o.skuCode, ordered: o.qty, received: o.qtyReceived, outstanding,
+      supplier: o.supplier ?? null, supplierReference: o.orderRef ?? null,
+      unitCostRM: rm(unitCostSen), unitCostSource: own ? "recorded on the order" : catalogue ? "catalogue estimate (order has no recorded cost)" : "unknown",
+      outstandingValueRM: unitCostSen ? rm(outstanding * unitCostSen) : null,
+      baysNeededOnArrival: Math.ceil(outstanding / Math.max(1, sku?.cap ?? 1)),
+      confirmedAt: o.confirmedAt ? new Date(o.confirmedAt).toISOString().slice(0, 10) : null,
     };
   });
-  return { openOrders: orders, committedRM: Math.round(orders.reduce((a, o) => a + (o.outstandingValueRM ?? 0), 0) * 100) / 100 };
+  const unknown = orders.filter((o) => o.outstandingValueRM === null).map((o) => o.po);
+  return {
+    openOrders: orders,
+    committedRM: unknown.length ? null : Math.round(orders.reduce((a, o) => a + (o.outstandingValueRM ?? 0), 0) * 100) / 100,
+    ...(unknown.length ? { committedUnknownBecause: `${unknown.join(", ")} has no unit cost` } : {}),
+    baysNeededOnArrival: orders.reduce((a, o) => a + o.baysNeededOnArrival, 0),
+  };
 }
 
+/** The same jointly feasible plan the Replenish panel shows. */
 export function reorderView(s: Snapshot, p: { sku?: string }, now: number) {
   const rule = s.settings.replenish;
-  const rows = replenishmentRows(s, now).filter((r) => match(p.sku, r.code));
-  const items = rows.map((r) => {
+  const plan = replenishmentPlan(s, now);
+  const c = plan.commitments;
+  const items = plan.rows.filter((r) => match(p.sku, r.code)).map((r) => {
     const x = r.inputs;
     return {
-      sku: r.code, item: r.title, status: r.s.status, recommendedQty: r.s.suggested,
+      sku: r.code, item: r.title, status: r.s.status,
+      recommendedQty: r.s.status === "ok" ? r.s.suggested : null,
+      candidateQtyBeforeSharedLimits: r.candidateQty,
+      allocationPriority: r.priority,
+      coverDaysAtRecentRate: r.coverDays,
+      limitedBy: r.s.limitedBy,
       reasoning: r.s.lines,
-      targetCoverUnits: r.s.target, shortfallBeforeLimits: r.s.raw, limitedBy: r.s.limitedBy,
+      targetCoverUnits: r.s.target,
       inputs: {
         netSalesInWindow: x.netSales, windowDays: rule.windowDays, coverageDays: rule.coverageDays, recordedHistoryDays: x.historyDays,
         onHand: x.onHand, reserved: x.reserved, available: x.onHand - x.reserved, incoming: x.incoming,
-        unitCostRM: rm(x.unitCostSen), budgetLeftRM: rm(x.budgetLeftSen) ?? 0, freeBays: x.freeBays, unitsPerBay: x.cap,
-        maxUnitsBySpace: x.freeBays * x.cap, maxUnitsByBudget: x.unitCostSen > 0 ? Math.floor(x.budgetLeftSen / x.unitCostSen) : null,
+        unitCostRM: rm(x.unitCostSen), unitsPerBay: x.cap,
+        budgetLeftForThisItemRM: r.budgetBeforeSen === null ? null : r.budgetBeforeSen / 100, baysLeftForThisItem: r.baysBefore,
       },
-      estimatedCostRM: rm(r.s.suggested * x.unitCostSen),
-      baysNeeded: r.s.suggested > 0 ? Math.ceil(r.s.suggested / x.cap) : 0,
+      estimatedCostRM: r.costSen / 100,
+      baysNeeded: r.bays,
     };
-  }).sort((a, b) => (b.recommendedQty - a.recommendedQty) || a.status.localeCompare(b.status));
-  const recommended = items.filter((i) => i.recommendedQty > 0);
-  const budgetLeftRM = items[0]?.inputs.budgetLeftRM ?? rm(rule.budgetSen) ?? 0;
-  const freeBays = freeSlotSet(s.batches).size;
-  const totalCostRM = Math.round(recommended.reduce((a, i) => a + (i.estimatedCostRM ?? 0), 0) * 100) / 100;
-  const totalBays = recommended.reduce((a, i) => a + i.baysNeeded, 0);
+  }).sort((a, b) => (a.allocationPriority ?? 1e9) - (b.allocationPriority ?? 1e9) || a.sku.localeCompare(b.sku));
   return {
-    rule: { windowDays: rule.windowDays, coverageDays: rule.coverageDays, purchaseBudgetRM: rm(rule.budgetSen) },
-    items,
-    combined: {
-      recommendedLines: recommended.length, totalCostRM, budgetLeftRM, totalBaysNeeded: totalBays, freeBays,
-      warnings: [
-        ...(totalCostRM > budgetLeftRM ? [`Combined recommendations cost RM${totalCostRM}, above the RM${budgetLeftRM} budget left after open orders; prioritise.`] : []),
-        ...(totalBays > freeBays ? [`Combined recommendations need ${totalBays} bays but only ${freeBays} are free; prioritise.`] : []),
-      ],
+    rule: { windowDays: rule.windowDays, coverageDays: rule.coverageDays, purchaseBudgetRM: rule.budgetSen / 100 },
+    sharedLimits: {
+      openOrdersCommittedRM: c.openOrderSen === null ? null : c.openOrderSen / 100,
+      budgetLeftBeforePlanRM: c.budgetLeftSen === null ? null : c.budgetLeftSen / 100,
+      freeBays: c.freeBays, baysKeptForIncomingOrders: c.incomingBays, baysLeftBeforePlan: c.baysLeft,
     },
+    plan: {
+      recommendedLines: plan.totals.recommendedLines, units: plan.totals.units,
+      totalCostRM: plan.totals.costSen / 100, totalBays: plan.totals.bays,
+      budgetLeftAfterRM: plan.totals.budgetLeftAfterSen === null ? null : plan.totals.budgetLeftAfterSen / 100,
+      baysLeftAfter: plan.totals.baysLeftAfter, itemsCutBySharedLimits: plan.totals.limitedLines,
+    },
+    notes: plan.notes,
+    items,
     insufficientData: items.filter((i) => i.status === "insufficient").map((i) => ({ sku: i.sku, why: i.reasoning.join("; ") })),
-    note: "Each item is limited by the shared budget and free bays independently; check 'combined' before ordering everything. Recording a purchase is a human step in Replenish.",
+    howToRead: "recommendedQty values are feasible together: SKUs claim the one shared remaining budget and the free bays (after open orders) in allocationPriority order, least cover first. candidateQtyBeforeSharedLimits is what the coverage rule alone asks for. Recording a purchase is a human step in Replenish.",
   };
 }
 
@@ -137,13 +156,13 @@ export function warehouseTools(snapshot: () => Promise<Snapshot | null>, now: ()
     },
     {
       name: "get_purchase_orders", label: "Purchase orders",
-      description: "Open confirmed supplier purchase orders: outstanding quantity, supplier, reference, unit cost and committed value.",
+      description: "Open confirmed supplier purchase orders: outstanding quantity, supplier, reference, each order's own unit cost, committed value and bays needed on arrival.",
       parameters: Type.Object({}),
       execute: async () => read((s) => purchaseOrdersView(s)),
     },
     {
       name: "analyze_reorder", label: "Reorder analysis",
-      description: "The warehouse replenishment rule per SKU: sales in the window → cover target, minus available and incoming, limited by free bays and remaining purchase budget. Marks items with insufficient data. Returns the exact inputs used.",
+      description: "The warehouse replenishment plan (the same one the Replenish panel shows): per SKU, sales in the window → cover target, minus available and incoming; then one shared remaining budget (after open orders at their own cost) and the free bays (after space kept for incoming orders) are allocated across SKUs in priority order, so recommended quantities are feasible together. Marks items with insufficient data and returns the exact inputs used.",
       parameters: Type.Object({ sku: Type.Optional(Type.String({ description: "Limit to one SKU" })) }),
       execute: async (_id, p) => read((s) => reorderView(s, p as { sku?: string }, now())),
     },

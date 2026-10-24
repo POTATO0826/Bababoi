@@ -69,7 +69,8 @@ async function load(ctx: MutationCtx) {
         skuCode: l.skuCode,
         candidates: [l.skuCode],
         qty: l.qty,
-        condition: "good",
+        // The synthetic note does not state condition: the presenter confirms it on arrival.
+        condition: "",
         confidence: l.confidence,
         questions: [],
         verified: false,

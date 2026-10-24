@@ -99,7 +99,7 @@ export interface SeedData {
   skus: (SkuLike & { synthetic: true })[];
   batches: SeedBatch[];
   reservations: { skuCode: string; batchCode: string; qty: number; label: string }[];
-  purchaseOrders: { code: string; skuCode: string; qty: number; createdAt: number }[];
+  purchaseOrders: { code: string; skuCode: string; qty: number; createdAt: number; unitCostSen: number; supplier: string; orderRef: string; confirmedAt: number }[];
   movements: SeedMovement[];
   receipts: {
     code: string;
@@ -199,7 +199,8 @@ export function buildSeed(now: number): SeedData {
     // Bookings sit on the youngest batch, so ageing batches stay unreserved.
     const youngest = mine[mine.length - 1]!;
     if (plan.reserved) reservations.push({ skuCode: s.code, batchCode: youngest.code, qty: plan.reserved, label: `Booking B-${bookingNo++}` });
-    if (plan.po) purchaseOrders.push({ code: `PO-${poNo++}`, skuCode: s.code, qty: plan.po, createdAt: at(6) });
+    // Synthetic confirmed orders carry their own unit cost, like a recorded supplier confirmation.
+    if (plan.po) { const code = `PO-${poNo++}`; purchaseOrders.push({ code, skuCode: s.code, qty: plan.po, createdAt: at(6), unitCostSen: s.price.unitCostSen, supplier: "Synthetic supplier", orderRef: `SYN-${code}`, confirmedAt: at(6) }); }
 
     // Confirmed sales over the last 90 days.
     const fixed = FIXED_RECENT_SALES[s.code];

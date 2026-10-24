@@ -1,5 +1,9 @@
 # Handoff — WareOrb local presentation demo (2026-10-24)
 
+> **Status update (Claude Cloud continuation):** the remaining work below and every finding in
+> `docs/local-demo-review.md` has been implemented and tested. See **`docs/local-demo.md`** for setup,
+> isolation guarantees, test evidence and the presentation-Mac smoke test. This file is kept as history.
+
 Read this first. It supersedes `docs/claude-handoff.md` for current work.
 
 ## Current requirement (user, verbatim intent)

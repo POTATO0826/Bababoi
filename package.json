@@ -14,6 +14,7 @@
     "typecheck:backend": "tsc -p convex --noEmit",
     "test": "bun test src/domain src/voice src/local && vitest run",
     "test:backend": "vitest run",
+    "test:browser": "bun tests/browser/run.ts",
     "check": "bun run test && bun run typecheck && bun run typecheck:backend && bun run build"
   },
   "dependencies": {

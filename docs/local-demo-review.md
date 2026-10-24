@@ -1,5 +1,12 @@
 # Local demo handoff review — 24 October 2026
 
+> **Resolved in the Claude Cloud continuation** (see `docs/local-demo.md`): local isolation (preflight over
+> ambient/`.env.local`/`.env`, exact loopback URL checks, allow-listed child environments, re-check after
+> the CLI writes), voice evidence with or without transcript, unknown condition preserved until confirmed,
+> one shared budget/space replenishment plan used by the panel and the agent, measurement UI and honest totals,
+> Jarvis ↔ Pi streaming with visible tool calls, portable Node selection, demo mode refused in release builds,
+> and new local-runtime / measurement / configuration / integration tests.
+
 Reviewed commit: `ddbb9445113115d2e045672e4b9a796ef6f4e553` on `backend-production`.
 
 ## Verdict

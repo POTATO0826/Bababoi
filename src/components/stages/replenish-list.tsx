@@ -11,7 +11,7 @@ import { run } from "@/convex";
 import { fmtRM, sen } from "@/domain/money";
 import { cn } from "@/lib/utils";
 import { actorNow, setWare, useWare } from "@/store";
-import { useSuggestions, type ReplenishRow } from "@/workflow";
+import { usePlan, useSuggestions, type ReplenishRow } from "@/workflow";
 import { NothingHere, WorkColumn, WorkList } from "./work-column";
 
 const localNow = () => {
@@ -22,7 +22,9 @@ const localNow = () => {
 
 export function ReplenishList({ className }: { className?: string }) {
   const rows = useSuggestions();
+  const plan = usePlan();
   const ledger = useWare((s) => s.ledger);
+  const insufficient = (plan?.rows ?? []).filter((r) => r.s.status === "insufficient" && (r.netSales > 0 || r.priority !== null));
   const role = useWare((s) => s.role);
   const [entry, setEntry] = useState<{ code?: string; qty?: number; rationale?: string } | null>(null);
   const rule = ledger?.settings.replenish;
@@ -34,7 +36,9 @@ export function ReplenishList({ className }: { className?: string }) {
     {role === "owner" && !ledger?.skus.length && <div className="p-3.5 text-[12px] text-muted-foreground">Create the real catalogue item before recording a supplier purchase.<Button size="sm" variant="outline" className="mt-2" onClick={() => setWare({ receiveOpen: true })}>Create item</Button></div>}
     {entry && <div className="border-b border-border p-3.5"><PurchaseOrderForm key={`${entry.code ?? "manual"}:${entry.qty ?? ""}`} initial={entry} onDone={() => setEntry(null)} /></div>}
     {orders.length > 0 && <WorkList label="Confirmed incoming" count={orders.length}>{orders.map((po) => <div key={po._id} className="flex flex-col gap-1 border-t border-border-inner px-3.5 py-2.5 text-[12px]"><span className="font-medium">{po.code} · {po.skuCode}</span><span className="text-muted-foreground">{po.supplier ?? "Supplier not recorded"} · {po.orderRef ?? "Reference not recorded"}</span><span className="font-mono text-faint">{po.qty - po.qtyReceived} outstanding / {po.qty} ordered{po.unitCostSen ? ` · ${fmtRM(po.unitCostSen)} / unit` : ""}</span><Button size="xs" variant="quiet" className="self-start" onClick={() => setWare({ stage: "receive" })}>Receive against this order</Button></div>)}</WorkList>}
-    <WorkList label="Suggested orders" count={rows.length}>{rows.map((r) => <SuggestionRow key={r.code} row={r} onRecord={() => setEntry({ code: r.code, qty: r.s.suggested, rationale: r.s.lines.join(" | ") })} />)}{!rows.length && <NothingHere title="No reorder suggestions" />}</WorkList>
+    {plan && <PlanSummary plan={plan} />}
+    <WorkList label="Suggested orders" count={rows.length}>{rows.map((r) => <SuggestionRow key={r.code} row={r} onRecord={() => setEntry({ code: r.code, qty: r.s.suggested, rationale: r.s.lines.join(" | ") })} />)}{!rows.length && <NothingHere title="No reorder suggestions" hint={plan?.commitments.budgetLeftSen === null ? "Remaining budget is unknown; see above." : undefined} />}</WorkList>
+    {insufficient.length > 0 && <WorkList label="Not enough data" count={insufficient.length}>{insufficient.map((r) => <div key={r.code} className="flex flex-col gap-0.5 border-t border-border-inner px-3.5 py-2 text-[12px]"><span className="font-medium">{r.title}</span>{r.s.lines.map((l) => <span key={l} className="text-muted-foreground">{l}</span>)}</div>)}</WorkList>}
   </WorkColumn>;
 }
 
@@ -42,8 +46,21 @@ function SuggestionRow({ row: r, onRecord }: { row: ReplenishRow; onRecord: () =
   const role = useWare((s) => s.role);
   const [open, setOpen] = useState(false);
   return <div className={cn("border-t border-border-inner px-3.5 py-2.5 transition-colors", open && "bg-hover-row")}>
-    <button className="flex w-full items-center gap-3 text-left" onClick={() => { setOpen(!open); showOnMap(r.code); }}><span className="flex min-w-0 flex-1 flex-col gap-0.5"><span className="truncate text-[13.5px] font-medium">{r.title}</span><span className="truncate font-mono text-[11.5px] text-faint">{r.netSales} sold · {r.onHand - r.reserved} free · {r.incoming} in</span></span><Badge variant="brand" className="font-mono">+{r.s.suggested}</Badge></button>
-    {open && <div className="mt-2 flex flex-col gap-2 pl-0.5">{r.s.lines.map((l) => <span key={l} className="font-mono text-[11px] text-muted-foreground">{l}</span>)}{role === "owner" && <Button size="sm" onClick={onRecord}>Record confirmed supplier purchase</Button>}</div>}
+    <button className="flex w-full items-center gap-3 text-left" onClick={() => { setOpen(!open); showOnMap(r.code); }}><span className="flex min-w-0 flex-1 flex-col gap-0.5"><span className="truncate text-[13.5px] font-medium">{r.title}</span><span className="truncate font-mono text-[11.5px] text-faint">{r.netSales} sold · {r.onHand - r.reserved} free · {r.incoming} in</span></span><span className="flex flex-col items-end gap-0.5"><Badge variant="brand" className="font-mono">+{r.s.suggested}</Badge>{r.s.suggested < r.candidateQty && <span className="font-mono text-[10.5px] text-warn">needs {r.candidateQty}</span>}</span></button>
+    {open && <div className="mt-2 flex flex-col gap-2 pl-0.5"><span className="font-mono text-[11px]">Priority {r.priority} · {r.coverDays ?? "?"} days of cover · {fmtRM(r.costSen)} · {r.bays} {r.bays === 1 ? "bay" : "bays"}</span>{r.s.lines.map((l) => <span key={l} className="font-mono text-[11px] text-muted-foreground">{l}</span>)}{role === "owner" && <Button size="sm" onClick={onRecord}>Record confirmed supplier purchase</Button>}</div>}
+  </div>;
+}
+
+/** What the plan already accounts for, so the totals below can be trusted together. */
+function PlanSummary({ plan }: { plan: NonNullable<ReturnType<typeof usePlan>> }) {
+  const c = plan.commitments;
+  return <div role="status" aria-label="Replenishment plan" className="flex flex-col gap-1 rounded-lg border border-border bg-panel p-3 text-[12px]">
+    <span className="text-[11.5px] font-semibold tracking-[.06em] uppercase">Shared limits</span>
+    <span className="font-mono text-muted-foreground">Budget {fmtRM(c.budgetSen)} − open orders {c.openOrderSen === null ? "unknown" : fmtRM(c.openOrderSen)} = {c.budgetLeftSen === null ? "unknown" : fmtRM(c.budgetLeftSen)} left</span>
+    <span className="font-mono text-muted-foreground">{c.freeBays} free bays − {c.incomingBays} kept for incoming = {c.baysLeft} bays left</span>
+    <span className="font-mono">Plan: {plan.totals.units} units · {fmtRM(plan.totals.costSen)} · {plan.totals.bays} bays → {plan.totals.budgetLeftAfterSen === null ? "budget unknown" : `${fmtRM(plan.totals.budgetLeftAfterSen)} left`} · {plan.totals.baysLeftAfter} bays left</span>
+    {plan.notes.map((n) => <span key={n} className="text-warn">{n}</span>)}
+    <span className="text-faint">Suggestions claim the shared budget and bays in priority order (least cover first), so they fit together. Purchases are recorded by a person.</span>
   </div>;
 }
 

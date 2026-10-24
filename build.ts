@@ -2,6 +2,11 @@ import tailwind from "bun-plugin-tailwind";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 
+// Release bundles never include the login-free local presentation mode (`bun run demo` serves its own page).
+if (process.env.BUN_PUBLIC_WAREORB_LOCAL_DEMO) {
+  throw new Error("BUN_PUBLIC_WAREORB_LOCAL_DEMO is set: refusing to build a release bundle in local demo mode.");
+}
+
 const outdir = path.join(process.cwd(), "dist");
 await rm(outdir, { recursive: true, force: true });
 

@@ -72,7 +72,8 @@ const RECEIPT_SCHEMA: Record<string, unknown> = {
 const extractionLine = (l: DraftLine, i: number) => ({
   ...l,
   key: `ai${Date.now()}${i}`,
-  condition: l.condition || "good",
+  // An unstated condition stays empty: staff confirm it before posting.
+  condition: l.condition,
   verified: false,
   source: "ai" as const,
 });
