@@ -140,7 +140,7 @@ describe("web logout", () => {
     release();
     const events = await turn;
     expect(events.some((e) => e.type === "done")).toBe(false);
-    expect(events.at(-1)).toMatchObject({ type: "error", message: expect.stringContaining("connection changed") });
+    expect(events.at(-1)).toMatchObject({ type: "error", message: expect.stringContaining("logged out or switched to another key, so this answer was stopped") });
     // The same browser session cannot reach the old key afterwards.
     expect(await ask("again", "session-logout-busy")).toEqual([{ type: "error", message: LOGGED_OUT, setup: true }]);
   });
@@ -154,7 +154,7 @@ describe("web logout", () => {
     await Bun.sleep(30);
     await webLogout();
     release();
-    expect(await reading).toEqual({ error: expect.stringContaining("connection changed") });
+    expect(await reading).toEqual({ error: expect.stringContaining("logged out or switched to another key while reading") });
   });
 
   test("a logout during a pending login wins; concurrent logins never restore an older one", async () => {

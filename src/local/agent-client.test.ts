@@ -33,8 +33,8 @@ describe("SSE parsing", () => {
 
   test("malformed events become visible errors", () => {
     expect(all(new SseParser(), ["data: {nope\n\ndata: 42\n\n"])).toEqual([
-      { type: "error", message: "The agent service sent a malformed event" },
-      { type: "error", message: "The agent service sent an event without a type" },
+      { type: "error", message: "Jarvis received an unreadable reply. Ask again." },
+      { type: "error", message: "Jarvis received an unreadable reply. Ask again." },
     ]);
   });
 });
@@ -56,15 +56,15 @@ describe("chat stream outcomes", () => {
   });
   test("server refusal and wrong content type", async () => {
     expect(await run(Response.json({ error: "The agent is busy" }, { status: 400 }))).toEqual({ outcome: "error", events: [{ type: "error", message: "The agent is busy" }] });
-    expect((await run(new Response("<html>", { headers: { "Content-Type": "text/html" } }))).events).toEqual([{ type: "error", message: "The agent service did not return a stream" }]);
+    expect((await run(new Response("<html>", { headers: { "Content-Type": "text/html" } }))).events).toEqual([{ type: "error", message: "Jarvis isn't responding properly (error 200). Try again; if it keeps happening, restart the demo." }]);
   });
   test("a stream that ends early is an error, never a silent success", async () => {
     const r = await run(streamResponse([`data: ${JSON.stringify({ type: "text", delta: "Half" })}\n\n`]));
     expect(r.outcome).toBe("error");
-    expect(r.events.at(-1)).toEqual({ type: "error", message: "The agent connection closed before the answer finished" });
+    expect(r.events.at(-1)).toEqual({ type: "error", message: "Jarvis's answer was cut off before it finished. Ask again." });
   });
   test("network failure and cancellation", async () => {
-    expect((await run(async () => { throw new TypeError("fetch failed"); })).events).toEqual([{ type: "error", message: expect.stringContaining("not reachable") }]);
+    expect((await run(async () => { throw new TypeError("fetch failed"); })).events).toEqual([{ type: "error", message: "Jarvis can't reach the WareOrb server on this computer. Check that the demo is still running, then try again." }]);
     const abort = new AbortController();
     abort.abort();
     expect(await run(async () => { throw new DOMException("aborted", "AbortError"); }, abort.signal)).toEqual({ outcome: "cancelled", events: [{ type: "cancelled" }] });

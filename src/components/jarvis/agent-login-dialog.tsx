@@ -1,4 +1,4 @@
-// Local demo: connect the warehouse agent with a Claude API key. The key stays in this component's
+// Local demo: connect Jarvis with a Claude API key. The key stays in this component's
 // state only while the form is open and goes once, as a same-origin POST body, to this computer's server.
 import { KeyRoundIcon } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -74,7 +74,7 @@ function LoginForm({ replacing }: { replacing: boolean }) {
   return (
     <form onSubmit={submit} className="flex flex-col gap-4" autoComplete="off">
       <DialogHeader>
-        <DialogTitle className="flex items-center gap-2"><KeyRoundIcon className="size-4" />{replacing ? "Switch Claude API key" : "Connect the warehouse agent"}</DialogTitle>
+        <DialogTitle className="flex items-center gap-2"><KeyRoundIcon className="size-4" />{replacing ? "Switch Jarvis's Claude API key" : "Connect Jarvis to Claude"}</DialogTitle>
         <DialogDescription id="agent-login-description">
           Provider: <b>Anthropic · Claude API key</b>. The key is checked with Claude, then kept only in this computer's
           WareOrb server memory until the demo stops. It is not saved to disk or the browser and is never shown again.

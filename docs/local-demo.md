@@ -35,10 +35,11 @@ is `.convex/demo-backend.log`.
 
 The warehouse opens without any account. Only the AI assistant needs a provider:
 
-1. In Jarvis, click **Log in** (next to "Agent not connected"), or type `/login` and press Enter.
+1. In Jarvis, click **Log in** (next to "Jarvis not connected"), or type `/login` and press Enter.
 2. Paste the **Claude API key** into the masked field and press **Log in**. The server checks the key
    with Anthropic (a model-metadata request, 15-second limit) before using it.
-3. Jarvis shows **Connected · Claude** with the model (`anthropic/claude-sonnet-5-5` by default).
+3. Jarvis shows **Connected · Claude** with the model (`claude-sonnet-5-5` by default); each answer is
+   signed "Jarvis · Claude · <model>".
    Chat and receipt photo reading use it immediately; no restart.
 4. **Log out** (status bar) or `/logout` disconnects at once. Answers and photo readings still running
    are stopped, and their conversations are retired. Later requests cannot use the old key, and no
@@ -67,7 +68,7 @@ configured on this computer is used. That means Pi's own login (`pi` → `/login
 order is `openai-codex/gpt-6.1-sol`, then `anthropic/claude-sonnet-5-5`; override with
 `WAREORB_AGENT_MODEL`. A web login always takes precedence, and an explicit web logout disables the
 fallback until the next web login. Logging out in the app never changes Pi's shared credentials.
-Without any connection, manual warehouse work still works, and Jarvis shows **Agent not connected**
+Without any connection, manual warehouse work still works, and Jarvis shows **Jarvis not connected**
 with a Log in button, never a scripted answer.
 
 ## Optional settings (shell environment)
@@ -100,7 +101,7 @@ If a check fails, move the offending `.env*` file aside or use a separate checko
 ## Using the demo
 
 - **Receive by photo**: Receive → open a receipt → photo icon (or the scan icon in Jarvis). Then
-  **Read with Pi agent**. The agent fills an editable draft: SKU, qty, unit, condition, packages,
+  **Read with Jarvis**. Jarvis fills an editable draft: SKU, qty, unit, condition, packages,
   L×W×H (cm), weight per item, per package and stated total. Unknown values stay blank.
   Unreadable parts become questions on the lines. A blurred or unreadable photo produces no lines and
   an error; enter the counted lines by hand.
@@ -132,7 +133,7 @@ If a check fails, move the offending `.env*` file aside or use a separate checko
 | `Port 3210 (local Convex) is already in use` | Stop the other program or `WAREORB_CONVEX_PORT=3220 bun run demo` |
 | `The local Convex backend needs Node.js 20, 22, 24` | Install Node 24 or set `WAREORB_CONVEX_NODE` |
 | `convex dev failed … github.com` | First run needs internet to download the backend |
-| Jarvis: "Agent not connected" | Click **Log in** (or `/login`) and enter a Claude API key |
+| Jarvis: "Jarvis not connected" | Click **Log in** (or `/login`) and enter a Claude API key |
 | Login: "Claude rejected this API key" | The key is wrong or revoked; create a new key in the Anthropic console |
 | Login: "Checking the key timed out" / "Could not reach api.anthropic.com" | Check the internet connection, then try again |
 | Jarvis: "The provider rejected the credentials" | The key was revoked meanwhile: **Log out**, then **Log in** with a valid key |
@@ -163,14 +164,14 @@ Run these in order on the presentation Mac. No terminal login is needed; the key
 2. `bun run demo:reset`. Expect `Loaded/Reloaded the synthetic demo data` and an `Agent …` line.
 3. `curl -s -H 'Origin: https://evil.example' http://127.0.0.1:3000/api/demo/token` is refused (403).
 4. Open http://127.0.0.1:3000 in Chrome. Check there is no app login screen and the header shows
-   "Local demo · synthetic data". Jarvis shows **Agent not connected** with **Log in**, and `/`
+   "Local demo · synthetic data". Jarvis shows **Jarvis not connected** with **Log in**, and `/`
    suggests `/login` (unless a developer fallback provider is configured).
 4a. **Log in** → enter a wrong key: a clear error, still disconnected. Then enter your Claude API key:
-   **Connected · Claude** with `anthropic/claude-sonnet-5-5`, no restart.
+   **Connected · Claude** with `claude-sonnet-5-5`, no restart.
 5. Jarvis: ask "What should we reorder and how much?". Expect an `analyze_reorder` tool card with a
    result, then a streamed answer whose quantities and totals match the Replenish panel. Press
    **Stop** during a second question; it shows "Stopped".
-6. Receive → new receipt → photo of a real handwritten note → Read with Pi agent. Expect editable
+6. Receive → new receipt → photo of a real handwritten note → Read with Jarvis. Expect editable
    lines, blank condition unless written, unknown values blank, and questions for anything unreadable.
    Then repeat with a blurred photo: expect an error and no lines.
 7. Microphone on a receipt: speak "two dining chairs, six kilograms each". Expect a voice evidence
@@ -179,7 +180,7 @@ Run these in order on the presentation Mac. No terminal login is needed; the key
    assign bays, tick checked, then **Post counted stock** twice. Stock rises once.
 9. Ctrl+C, then `bun run demo` again (no `--reset`). Expect "Kept the existing local warehouse data",
    with the posted receipt and stock still there.
-10. Refresh the page: still connected. Run `/logout`: **Agent not connected**. A question is now
+10. Refresh the page: still connected. Run `/logout`: **Jarvis not connected**. A question is now
     refused (no old key, no fallback); manual receiving and Replenish still work. Log in again through
     the form and ask once more. Stop and restart the demo: disconnected again (the key is never restored
     from disk or the browser), unless a developer fallback provider is configured.
@@ -314,3 +315,20 @@ Pending on the presentation Mac:
 - Logging in with the user's own key in Chrome, and receipt reading of a real handwritten photo
   after a web login.
 - Run steps 4–10 of the smoke test above.
+
+## User-facing naming (Jarvis)
+
+The assistant is presented only as **Jarvis**. The UI never shows the agent framework (Pi), SDK or
+runtime names. Provider details that matter to the presenter stay visible:
+
+- the status bar: **Connected · Claude** and the model, e.g. `claude-sonnet-5-5`;
+- each answer's footer: "Jarvis · Claude · <model>";
+- tool calls with their real names, arguments and results.
+
+The receipt button is **Read with Jarvis**. Errors say what happened and what to do next, for example
+"Claude rejected the API key … Log out, then use Log in with a valid Claude API key" or "Jarvis can't
+reach the WareOrb server on this computer. Check that the demo is still running". Raw provider
+payloads and internal details go only to the server log, redacted. `src/local/branding.test.ts`
+guards the visible strings, and the browser test checks the rendered page for Pi or SDK wording.
+Internally, the integration, dependencies, routes and behaviour are unchanged. Earlier evidence
+sections above quote the wording that was current when they were written.

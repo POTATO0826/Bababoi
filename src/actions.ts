@@ -16,7 +16,7 @@ import {
 } from "@/data/catalog";
 import { SLOT_BY_ID } from "@/data/layout";
 import { localDemo } from "@/identity";
-import { fetchAgentStatus, loginAgent, logoutAgent, streamAgentChat } from "@/local/agent-client";
+import { fetchAgentStatus, loginAgent, logoutAgent, providerLabel, streamAgentChat } from "@/local/agent-client";
 import { actorNow, getInventory, getWare, setWare, type AgentTurn, type TranscriptLine, type ViewMode } from "@/store";
 import { scanToReceipt } from "@/scan";
 import { recordUtterance, say, stopSpeaking, transcribe } from "@/voice/voice";
@@ -394,7 +394,7 @@ export async function loginLocalAgent(apiKey: string, signal?: AbortSignal): Pro
   stopLocalAgent();
   agentSessionId = crypto.randomUUID();
   setWare({ localAgent: { ...r.status, checkedAt: Date.now() }, agentLoginOpen: false });
-  pushLine("ai", `Connected · ${r.status.provider === "anthropic" ? "Claude" : r.status.provider} (${r.status.provider}/${r.status.model}). Ask me about stock, movements or reordering.`);
+  pushLine("ai", `Connected · ${providerLabel(r.status.provider)} (${r.status.modelName ?? r.status.model}). Ask me about stock, movements or reordering.`);
   return { ok: true };
 }
 
@@ -408,7 +408,7 @@ export async function logoutLocalAgent() {
   if (my !== authEpoch) return;
   if (r.ok) {
     setWare({ localAgent: { ...r.status, checkedAt: Date.now() } });
-    pushLine("ai", "Logged out. The agent is disconnected; manual warehouse work continues. Use Log in to connect again.");
+    pushLine("ai", "Logged out. Jarvis is disconnected; manual warehouse work continues. Use Log in to connect again.");
   } else {
     if (r.status) setWare({ localAgent: { ...r.status, checkedAt: Date.now() } });
     pushLine("ai", `Logout did not complete: ${r.error}`);

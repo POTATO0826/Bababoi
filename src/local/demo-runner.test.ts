@@ -164,7 +164,7 @@ describe("a clean start", () => {
     expect(h.starts.map((s) => s.log ?? "inherit")).toEqual([".convex/demo-backend.log", "inherit"]);
     const ledger = h.fetches.find((f) => String(f.init.body).includes("ledger:snapshot"))!;
     expect((ledger.init.headers as Record<string, string>).Authorization).toMatch(/^Bearer ey/);
-    expect(h.logs).toContain("Agent not connected: No agent provider is configured (mocked status)");
+    expect(h.logs).toContain("Jarvis not connected yet: open the page and use Log in in Jarvis (No agent provider is configured (mocked status))");
   });
 
   test("restart keeps existing data; --reset reloads it; --setup-only starts no web server", async () => {

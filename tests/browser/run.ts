@@ -92,7 +92,7 @@ try {
   };
 
   // 1. Disconnected: a visible Log in action and /login in the menu.
-  await page.getByText("Agent not connected").first().waitFor({ timeout: 15_000 });
+  await page.getByText("Jarvis not connected").first().waitFor({ timeout: 15_000 });
   check(await page.getByRole("button", { name: "Log in" }).first().isVisible(), "disconnected status shows a Log in button");
   await input.fill("/");
   check(await page.getByRole("option", { name: /\/login/ }).isVisible(), "typing / suggests /login");
@@ -113,7 +113,7 @@ try {
   check(!(await secretsVisible(wrongKey.slice(14))), "the wrong key is not echoed anywhere on the page");
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await dialog.waitFor({ state: "hidden" });
-  check(await page.getByText("Agent not connected").first().isVisible(), "cancelling leaves the agent disconnected");
+  check(await page.getByText("Jarvis not connected").first().isVisible(), "cancelling leaves the agent disconnected");
 
   // 3. Mouse: the Log in button opens an empty form; a valid key connects without a restart.
   await page.getByRole("button", { name: "Log in" }).first().click();
@@ -125,6 +125,7 @@ try {
   check(await dialog.waitFor({ state: "hidden", timeout: 5_000 }).then(() => true, () => false), "the form closes after a successful login");
   check(await page.getByRole("button", { name: "Log out", exact: true }).waitFor({ timeout: 5_000 }).then(() => true, () => false), "connected status shows a Log out button");
   check(!(await secretsVisible(validKey)), "the key is not in the page, transcript or browser storage");
+  check(await page.getByText(live ? "Connected · Claude" : "Connected · mocked-provider").first().isVisible(), "status shows Connected · <provider> with the model");
   const statusText = await page.locator("text=/Connected · /").first().innerText();
   console.log(`INFO  status: ${statusText}`);
 
@@ -133,7 +134,7 @@ try {
   await input.press("Enter");
   const tool = page.locator("details", { hasText: "analyze_reorder" }).first();
   await tool.waitFor({ timeout: T });
-  await page.locator("text=/Pi · /").first().waitFor({ timeout: T });
+  await page.locator("text=/Jarvis · /").first().waitFor({ timeout: T });
   await page.getByRole("button", { name: "Send" }).waitFor({ timeout: live ? 180_000 : 15_000 });
   check(await tool.isVisible(), "tool call analyze_reorder is shown");
   await tool.locator("summary").click();
@@ -142,7 +143,9 @@ try {
   const answer = await page.locator("[data-slot='bubble'], .whitespace-pre-wrap").allInnerTexts();
   const answered = answer.join("\n");
   check(live ? /\d/.test(answered) : answered.includes("MOCKED PROVIDER: the plan recommends 12 units"), "the streamed answer text is rendered");
-  check(await page.locator("text=/Pi · (mocked-provider|anthropic)/").first().isVisible(), "the answering provider/model is labelled");
+  check(await page.locator(live ? "text=/Jarvis · Claude · claude-/" : "text=/Jarvis · mocked-provider · mocked-model/").first().isVisible(), "the answer footer names Jarvis, the provider and the model");
+  const visible = await page.locator("body").innerText();
+  check(!/\bPi\b|Pi agent|pi\.dev|\bSDK\b/.test(visible), "no Pi or SDK wording anywhere on the page");
   await page.screenshot({ path: join(shots, "jarvis-agent.png") });
 
   // 5. Secrets typed into the chat are never recorded or sent.
@@ -163,11 +166,11 @@ try {
   // 6. /logout chosen with the mouse disconnects; the next question cannot use the old key.
   await input.fill("/logout");
   await page.getByRole("option", { name: /\/logout/ }).click();
-  await page.getByText("Agent not connected").first().waitFor({ timeout: 10_000 });
-  check(await page.getByText(/Logged out\. The agent is disconnected/).waitFor({ timeout: 10_000 }).then(() => true, () => false), "/logout disconnects and says so");
+  await page.getByText("Jarvis not connected").first().waitFor({ timeout: 10_000 });
+  check(await page.getByText(/Logged out\. Jarvis is disconnected/).waitFor({ timeout: 10_000 }).then(() => true, () => false), "/logout disconnects and says so");
   await input.fill("How many sofas?");
   await input.press("Enter");
-  check(await page.getByRole("alert").filter({ hasText: /agent is logged out/i }).last().waitFor({ timeout: 10_000 }).then(() => true, () => false), "after logout a question is refused (no fallback, no old key)");
+  check(await page.getByRole("alert").filter({ hasText: /Jarvis is logged out/i }).last().waitFor({ timeout: 10_000 }).then(() => true, () => false), "after logout a question is refused (no fallback, no old key)");
 
   // 7. Ordinary warehouse commands still work locally.
   await input.fill("/replenish");

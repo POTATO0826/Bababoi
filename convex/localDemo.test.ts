@@ -155,9 +155,9 @@ describe("local agent bridge (stubbed loopback agent service)", () => {
   it.each([
     ["an unreadable photo", () => Response.json({ supplier: null, docRef: null, lines: [], unreadable: ["The whole photo is blurred"] }), /No goods lines could be read \(The whole photo is blurred\)/],
     ["a malformed reply", () => Response.json({ lines: "garbage" }), /No goods lines could be read/],
-    ["a non-JSON reply", () => new Response("<html>oops", { status: 200 }), /Local agent error 200/],
+    ["a non-JSON reply", () => new Response("<html>oops", { status: 200 }), /Jarvis couldn't read this evidence \(error 200\)/],
     ["a reading error", () => Response.json({ error: "No agent provider is configured. Run pi /login" }, { status: 422 }), /No agent provider is configured/],
-    ["an unreachable service", () => { throw new TypeError("fetch failed"); }, /not reachable/],
+    ["an unreachable service", () => { throw new TypeError("fetch failed"); }, /Jarvis isn't reachable right now/],
   ])("%s is shown as an extraction error and creates no lines", async (_name, reply, message) => {
     local();
     vi.stubGlobal("fetch", vi.fn(async () => reply()));
@@ -188,6 +188,6 @@ describe("local agent bridge (stubbed loopback agent service)", () => {
     const { t, owner } = await business();
     const r = await extract(owner, t, photo(owner, t));
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(r.extraction.error).toMatch(/AI reading is off/);
+    expect(r.extraction.error).toMatch(/AI reading isn't set up for this warehouse/);
   });
 });

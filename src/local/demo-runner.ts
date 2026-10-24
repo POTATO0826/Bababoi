@@ -174,7 +174,7 @@ export async function runDemo(d: DemoDeps): Promise<RunningDemo> {
       PI_TELEMETRY: "0",
     }));
     const status = await d.agentStatus().catch((e) => ({ ready: false, reason: e instanceof Error ? e.message : "unknown error" }) as Awaited<ReturnType<DemoDeps["agentStatus"]>>);
-    d.log(status.ready ? `Agent: Pi · ${status.provider}/${status.model}${status.subscription ? " (subscription)" : ""}` : `Agent not connected: ${status.reason}`);
+    d.log(status.ready ? `Jarvis: connected to ${status.provider}/${status.model}${status.subscription ? " (subscription)" : ""}` : `Jarvis not connected yet: open the page and use Log in in Jarvis (${status.reason})`);
     d.log(`Open ${webUrl} — Ctrl+C stops the demo (data stays in .convex/local).`);
     return { ports, convexUrl: target.convexUrl, siteUrl: target.siteUrl, webUrl, web: web.exited, stop };
   } catch (e) {

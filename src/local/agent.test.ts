@@ -65,7 +65,7 @@ describe("warehouse analyst turn (mocked provider)", () => {
     faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "401 Unauthorized: invalid api key" })]);
     const events = await turn("session-badcreds-1", "Stock?");
     expect(events.at(-1)).toMatchObject({ type: "error" });
-    expect(events.at(-1)).toMatchObject({ setup: true, message: expect.stringMatching(/rejected the credentials.*Log in in Jarvis \(or type \/login\)/) });
+    expect(events.at(-1)).toMatchObject({ setup: true, message: "Claude rejected the API key (it may have been revoked or lack access). Log out, then use Log in with a valid Claude API key." });
   });
 
   test("a busy conversation refuses a second simultaneous question; cancellation stops the turn", async () => {
@@ -124,12 +124,12 @@ describe("reading delivery evidence into a draft (mocked provider)", () => {
     const { faux, resolved } = await mockedPi();
     setModelResolverForTests(async () => resolved);
     faux.setResponses([fauxAssistantMessage("The photo is too blurry to read.")]);
-    expect(await readDeliveryEvidence({ catalogue, evidence: [{ kind: "note", text: "smudged" }] })).toEqual({ error: "The model returned no structured draft. Enter the counted lines by hand." });
+    expect(await readDeliveryEvidence({ catalogue, evidence: [{ kind: "note", text: "smudged" }] })).toEqual({ error: "Jarvis couldn't turn this evidence into receipt lines. Try a clearer photo or note, or enter the counted lines by hand." });
   });
 
   test("a model without image input refuses photos instead of guessing", async () => {
     const { resolved } = await mockedPi({ input: ["text"] });
     setModelResolverForTests(async () => resolved);
-    expect(await readDeliveryEvidence({ catalogue, evidence: [{ kind: "photo", mime: "image/jpeg", data: "AAAA" }] })).toEqual({ error: "mocked-provider/mocked-model cannot read photos. Choose a model with image input." });
+    expect(await readDeliveryEvidence({ catalogue, evidence: [{ kind: "photo", mime: "image/jpeg", data: "AAAA" }] })).toEqual({ error: "The connected model can't read photos. Connect a Claude API key with Log in, or enter the counted lines by hand." });
   });
 });

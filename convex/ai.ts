@@ -106,10 +106,10 @@ async function readWithLocalAgent(ctx: ActionCtx, agent: { url: string; secret: 
       signal: AbortSignal.timeout(180_000),
     });
   } catch {
-    return { status: "error", error: "The local agent service is not reachable. Start the demo with `bun run demo`, or enter the lines by hand." };
+    return { status: "error", error: "Jarvis isn't reachable right now. Check that the demo is still running, or enter the counted lines by hand." };
   }
   const body = (await res.json().catch(() => null)) as { error?: unknown; supplier?: unknown; docRef?: unknown; lines?: unknown; unreadable?: unknown } | null;
-  if (!res.ok || !body) return { status: "error", error: typeof body?.error === "string" ? body.error.slice(0, 300) : `Local agent error ${res.status}` };
+  if (!res.ok || !body) return { status: "error", error: typeof body?.error === "string" && res.status !== 401 ? body.error.slice(0, 300) : `Jarvis couldn't read this evidence (error ${res.status}). Try again; if it keeps happening, restart the demo. You can also enter the counted lines by hand.` };
   const lines = (Array.isArray(body.lines) ? body.lines : []).map(draftLine).filter((l): l is DraftLine => l !== null).slice(0, 30);
   const unreadable = Array.isArray(body.unreadable) ? body.unreadable.filter((u): u is string => typeof u === "string").slice(0, 4) : [];
   if (!lines.length) {
@@ -135,14 +135,14 @@ export const extractReceipt = internalAction({
     try {
       data = await ctx.runQuery(internal.receiving.forExtraction, { receiptId, jobVersion });
     } catch {
-      return await done({ status: "error", error: "Reading could not start. Check catalogue limits and try again." });
+      return await done({ status: "error", error: "Jarvis couldn't start reading (the catalogue may be too large). Enter the counted lines by hand." });
     }
-    if (!data) return await done({ status: "error", error: "Reading cancelled because the receipt or requester changed. Ask active staff to retry." });
+    if (!data) return await done({ status: "error", error: "Reading was cancelled because the receipt changed. Press Read with Jarvis again." });
     const agent = localAgent();
     if (agent) return await done(await readWithLocalAgent(ctx, agent, data));
     const anthropic = claude();
-    if (!anthropic) return await done({ status: "error", error: "AI reading is off (no ANTHROPIC_API_KEY) — enter lines by hand" });
-    if (!(await slot(ctx))) return await done({ status: "error", error: "Busy — try again in a minute" });
+    if (!anthropic) return await done({ status: "error", error: "Jarvis can't read evidence here because AI reading isn't set up for this warehouse. Enter the counted lines by hand." });
+    if (!(await slot(ctx))) return await done({ status: "error", error: "Jarvis is busy. Try again in a minute." });
 
     const content: Anthropic.Beta.BetaContentBlockParam[] = [];
     for (const e of data.evidence) {
@@ -156,7 +156,7 @@ export const extractReceipt = internalAction({
       }
       if (e.text) content.push({ type: "text", text: `${e.kind === "voice" ? "Voice note (transcript)" : "Note"}: ${e.text}` });
     }
-    if (!content.length) return await done({ status: "error", error: "Nothing readable yet" });
+    if (!content.length) return await done({ status: "error", error: "Nothing readable yet: add a photo, document or note, or enter the counted lines by hand." });
     content.push({ type: "text", text: "Extract the received goods as lines." });
 
     const catalogue = data.catalogue.map((s) => `${s.code} | ${s.model} | ${s.variant} | ${s.category}`).join("\n");
@@ -171,7 +171,7 @@ Catalogue (code | model | variant | category):
 ${catalogue}`,
         messages: [{ role: "user", content }],
       });
-      if (res.stop_reason === "refusal") return await done({ status: "error", error: "Couldn't read this — enter lines by hand" });
+      if (res.stop_reason === "refusal") return await done({ status: "error", error: "Jarvis couldn't read this evidence. Enter the counted lines by hand." });
       const parsed = JSON.parse(textOf(res.content)) as { supplier: string; docRef: string; lines: unknown[] };
       await done({
         status: "done",
@@ -180,7 +180,7 @@ ${catalogue}`,
         lines: parsed.lines.map(draftLine).filter((l): l is DraftLine => l !== null).slice(0, 30).map(extractionLine),
       });
     } catch (e) {
-      await done({ status: "error", error: e instanceof Anthropic.APIError ? `AI error ${e.status}` : "Couldn't read this — enter lines by hand" });
+      await done({ status: "error", error: e instanceof Anthropic.APIError ? `Jarvis couldn't read this evidence (AI service error ${e.status}). Try again, or enter the counted lines by hand.` : "Jarvis couldn't read this evidence. Try again, or enter the counted lines by hand." });
     }
     return null;
   },

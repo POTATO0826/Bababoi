@@ -46,8 +46,8 @@ export interface AgentCommand {
 }
 
 export function agentCommands(connected: boolean): AgentCommand[] {
-  const login: AgentCommand = { id: "login", label: connected ? "Switch Claude API key" : "Log in with a Claude API key", icon: KeyRoundIcon, keywords: ["login", "connect", "api key", "claude", "sign in", "登录"] };
-  const logout: AgentCommand = { id: "logout", label: "Log out of the agent", icon: LogOutIcon, keywords: ["logout", "disconnect", "sign out", "退出"] };
+  const login: AgentCommand = { id: "login", label: connected ? "Switch Jarvis's Claude API key" : "Connect Jarvis with a Claude API key", icon: KeyRoundIcon, keywords: ["login", "connect", "api key", "claude", "sign in", "登录"] };
+  const logout: AgentCommand = { id: "logout", label: "Log Jarvis out (disconnect Claude)", icon: LogOutIcon, keywords: ["logout", "disconnect", "sign out", "退出"] };
   return connected ? [logout, login] : [login];
 }
 

@@ -4,6 +4,12 @@ import type { AgentEvent, AgentStatus } from "./agent";
 
 export type { AgentEvent, AgentStatus };
 
+/** User-facing transport messages: what happened and what to do, without implementation details. */
+export const UNREACHABLE = "Jarvis can't reach the WareOrb server on this computer. Check that the demo is still running, then try again.";
+export const GARBLED = "Jarvis received an unreadable reply. Ask again.";
+export const CUT_OFF = "Jarvis's answer was cut off before it finished. Ask again.";
+const notResponding = (status: number) => `Jarvis isn't responding properly (error ${status}). Try again; if it keeps happening, restart the demo.`;
+
 /** Incremental `text/event-stream` parser for `data:` JSON events. */
 export class SseParser {
   private buffer = "";
@@ -42,9 +48,9 @@ export class SseParser {
       try {
         const event = JSON.parse(raw) as AgentEvent;
         if (event && typeof event === "object" && typeof (event as { type?: unknown }).type === "string") out.push(event);
-        else out.push({ type: "error", message: "The agent service sent an event without a type" });
+        else out.push({ type: "error", message: GARBLED });
       } catch {
-        out.push({ type: "error", message: "The agent service sent a malformed event" });
+        out.push({ type: "error", message: GARBLED });
       }
       return;
     }
@@ -83,11 +89,11 @@ export async function streamAgentChat(
     });
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
-      deliver({ type: "error", message: typeof body?.error === "string" ? body.error : `The agent service answered ${res.status}` });
+      deliver({ type: "error", message: typeof body?.error === "string" ? body.error : notResponding(res.status) });
       return terminal!;
     }
     if (!res.headers.get("content-type")?.startsWith("text/event-stream") || !res.body) {
-      deliver({ type: "error", message: "The agent service did not return a stream" });
+      deliver({ type: "error", message: notResponding(res.status) });
       return terminal!;
     }
     const reader = res.body.getReader();
@@ -100,20 +106,20 @@ export async function streamAgentChat(
       if (terminal) { void reader.cancel().catch(() => {}); break; }
     }
     if (!terminal) for (const e of [...parser.feed(decoder.decode()), ...parser.end()]) deliver(e);
-    if (!terminal) deliver({ type: "error", message: "The agent connection closed before the answer finished" });
+    if (!terminal) deliver({ type: "error", message: CUT_OFF });
   } catch (e) {
     if (opts.signal?.aborted || (e instanceof DOMException && e.name === "AbortError")) deliver({ type: "cancelled" });
-    else deliver({ type: "error", message: "The local agent service is not reachable. Is `bun run demo` still running?" });
+    else deliver({ type: "error", message: UNREACHABLE });
   }
   return terminal!;
 }
 
-const unreachable: AgentStatus = { ready: false, connection: "none", reason: "The local agent service is not reachable. Is the demo still running?" };
+const unreachable: AgentStatus = { ready: false, connection: "none", reason: UNREACHABLE };
 
 export async function fetchAgentStatus(fetchImpl: typeof fetch = fetch): Promise<AgentStatus> {
   try {
     const res = await fetchImpl("/api/agent/status", { cache: "no-store" });
-    if (!res.ok) return { ready: false, connection: "none", reason: `The agent service answered ${res.status}` };
+    if (!res.ok) return { ready: false, connection: "none", reason: notResponding(res.status) };
     return (await res.json()) as AgentStatus;
   } catch {
     return unreachable;
@@ -127,7 +133,7 @@ async function postAuth(path: string, body: unknown, fetchImpl: typeof fetch, si
     const res = await fetchImpl(path, { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
     const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: unknown; status?: AgentStatus } | null;
     if (res.ok && data?.ok && data.status) return { ok: true, status: data.status };
-    return { ok: false, error: typeof data?.error === "string" ? data.error : `The agent service answered ${res.status}`, ...(data?.status ? { status: data.status } : {}) };
+    return { ok: false, error: typeof data?.error === "string" ? data.error : notResponding(res.status), ...(data?.status ? { status: data.status } : {}) };
   } catch {
     if (signal?.aborted) return { ok: false, error: "Cancelled" };
     return { ok: false, error: unreachable.reason!, status: unreachable };
@@ -140,3 +146,14 @@ export const loginAgent = (apiKey: string, opts: { signal?: AbortSignal; fetchIm
 
 /** Disconnect this app's agent on the server. */
 export const logoutAgent = (opts: { fetchImpl?: typeof fetch } = {}) => postAuth("/api/agent/logout", {}, opts.fetchImpl ?? fetch);
+
+/** The provider name people know, e.g. "anthropic" → "Claude". */
+export function providerLabel(provider: string | undefined): string {
+  if (!provider) return "AI provider";
+  if (provider === "anthropic") return "Claude";
+  if (provider === "openai" || provider === "openai-codex") return "ChatGPT";
+  return provider;
+}
+
+/** "anthropic/claude-sonnet-5-5" → "claude-sonnet-5-5" (the model, without the provider prefix). */
+export const modelLabel = (model: string | undefined) => (model ? model.slice(model.indexOf("/") + 1) : "");

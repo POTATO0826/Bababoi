@@ -156,7 +156,7 @@ describe("extraction bridge (Convex action → local agent service)", () => {
       faux.setResponses([fauxAssistantMessage("I cannot read this.")]);
       const bad = await post(base, `Bearer ${SECRET}`, { catalogue: [], evidence: [{ kind: "note", text: "??" }] });
       expect(bad.status).toBe(422);
-      expect(await bad.json()).toEqual({ error: "The model returned no structured draft. Enter the counted lines by hand." });
+      expect(await bad.json()).toEqual({ error: "Jarvis couldn't turn this evidence into receipt lines. Try a clearer photo or note, or enter the counted lines by hand." });
     } finally { server.stop(true); }
   });
 });

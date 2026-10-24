@@ -80,22 +80,22 @@ export function localDemoRoutes(cfg: LocalDemoConfig, ops: AgentOps = { agentSta
   return {
     "/api/demo/token": {
       GET: async (req: Request) => {
-        if (!fromThisApp(req)) return deny(403, "Local presentation identity is only available to this app");
+        if (!fromThisApp(req)) return deny(403, "This page can only be used from the WareOrb demo on this computer.");
         return Response.json(await mintDemoToken(cfg.privateJwk, LOCAL_DEMO_PRESENTER), { headers: noStore });
       },
     },
     "/api/agent/status": {
-      GET: async (req: Request) => (fromThisApp(req) ? Response.json(await ops.agentStatus(), { headers: noStore }) : deny(403, "Forbidden")),
+      GET: async (req: Request) => (fromThisApp(req) ? Response.json(await ops.agentStatus(), { headers: noStore }) : deny(403, "This page can only be used from the WareOrb demo on this computer.")),
     },
     "/api/agent/chat": {
       POST: async (req: Request) => {
-        if (!mutationFromThisApp(req)) return deny(403, "Forbidden");
+        if (!mutationFromThisApp(req)) return deny(403, "This page can only be used from the WareOrb demo on this computer.");
         const read = await readJson(req, MAX_JSON.chat);
-        if (read && "tooLarge" in read) return deny(413, "Request too large");
+        if (read && "tooLarge" in read) return deny(413, "This request is too large.");
         const body = (read?.value ?? null) as { sessionId?: unknown; text?: unknown } | null;
         const sessionId = typeof body?.sessionId === "string" && /^[\w-]{8,64}$/.test(body.sessionId) ? body.sessionId : null;
         const text = typeof body?.text === "string" ? body.text.trim() : "";
-        if (!sessionId || !text || text.length > 2000) return deny(400, "A session id and a 1–2000 character question are required");
+        if (!sessionId || !text || text.length > 2000) return deny(400, "Ask a question of up to 2,000 characters.");
         const encoder = new TextEncoder();
         const abort = new AbortController();
         req.signal?.addEventListener("abort", () => abort.abort(), { once: true });
@@ -110,7 +110,10 @@ export function localDemoRoutes(cfg: LocalDemoConfig, ops: AgentOps = { agentSta
             const emit = (e: AgentEvent) => send(`data: ${JSON.stringify(e)}\n\n`);
             heartbeat = setInterval(() => send(": keep-alive\n\n"), HEARTBEAT_MS);
             try { await ops.runAnalystTurn(sessionId, text, () => warehouseTools(snapshot), emit, abort.signal); }
-            catch (e) { emit({ type: "error", message: e instanceof Error ? e.message : "The agent failed" }); }
+            catch (e) {
+              console.warn(`[agent] chat route failed: ${e instanceof Error ? e.message.slice(0, 300) : String(e)}`);
+              emit({ type: "error", message: "Jarvis couldn't answer this time. Ask again." });
+            }
             finally {
               clearInterval(heartbeat);
               if (!closed) { closed = true; try { controller.close(); } catch { /* already closed */ } }
@@ -128,11 +131,11 @@ export function localDemoRoutes(cfg: LocalDemoConfig, ops: AgentOps = { agentSta
     },
     "/api/agent/login": {
       POST: async (req: Request) => {
-        if (!mutationFromThisApp(req)) return deny(403, "Forbidden");
+        if (!mutationFromThisApp(req)) return deny(403, "This page can only be used from the WareOrb demo on this computer.");
         const read = await readJson(req, MAX_JSON.auth);
-        if (read && "tooLarge" in read) return deny(413, "Request too large");
+        if (read && "tooLarge" in read) return deny(413, "This request is too large.");
         const body = (read?.value ?? null) as { provider?: unknown; apiKey?: unknown } | null;
-        if (!body || typeof body !== "object" || (body.provider ?? "anthropic") !== "anthropic" || typeof body.apiKey !== "string") return deny(400, "Send a Claude API key");
+        if (!body || typeof body !== "object" || (body.provider ?? "anthropic") !== "anthropic" || typeof body.apiKey !== "string") return deny(400, "Enter a Claude API key.");
         // The key lives only in this request and the in-memory runtime; it is never logged or returned.
         const result = await ops.login(body.apiKey, req.signal);
         return Response.json(result.ok ? { ok: true, status: result.status } : { ok: false, error: result.error, status: result.status }, { status: result.ok ? 200 : 422, headers: noStore });
@@ -140,9 +143,9 @@ export function localDemoRoutes(cfg: LocalDemoConfig, ops: AgentOps = { agentSta
     },
     "/api/agent/logout": {
       POST: async (req: Request) => {
-        if (!mutationFromThisApp(req)) return deny(403, "Forbidden");
+        if (!mutationFromThisApp(req)) return deny(403, "This page can only be used from the WareOrb demo on this computer.");
         const read = await readJson(req, MAX_JSON.auth);
-        if (read && "tooLarge" in read) return deny(413, "Request too large");
+        if (read && "tooLarge" in read) return deny(413, "This request is too large.");
         return Response.json({ ok: true, status: await ops.logout() }, { headers: noStore });
       },
     },
@@ -150,7 +153,7 @@ export function localDemoRoutes(cfg: LocalDemoConfig, ops: AgentOps = { agentSta
       POST: async (req: Request) => {
         if (!hosts.has(req.headers.get("host") ?? "") || !fromBackend(req)) return deny(401, "Unauthorised");
         const read = await readJson(req, MAX_JSON.extract);
-        if (read && "tooLarge" in read) return deny(413, "Request too large");
+        if (read && "tooLarge" in read) return deny(413, "This request is too large.");
         const body = (read?.value ?? null) as Partial<ReadInput> | null;
         if (!body || !Array.isArray(body.catalogue) || !Array.isArray(body.evidence) || body.evidence.length > 20) return deny(400, "Invalid reading request");
         const result = await ops.readDeliveryEvidence({ catalogue: body.catalogue.slice(0, 500), evidence: body.evidence });

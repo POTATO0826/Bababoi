@@ -31,7 +31,7 @@ const PREFERRED = [
 ] as const;
 
 /** Shown to the presenter: the web Log in action, not terminal steps (those live in docs/local-demo.md). */
-export const SETUP_HINT = "Use Log in in Jarvis (or type /login) to connect a Claude API key.";
+export const SETUP_HINT = "Use Log in (or type /login) to connect a Claude API key.";
 
 type Model = NonNullable<ReturnType<ModelRuntime["getModel"]>>;
 type Resolved = { runtime: ModelRuntime; model: Model } | { error: string };
@@ -53,9 +53,12 @@ async function resolveConfiguredModel(): Promise<Resolved> {
       const slash = explicit.indexOf("/");
       const provider = slash > 0 ? explicit.slice(0, slash) : "";
       const model = provider ? rt.getModel(provider, explicit.slice(slash + 1)) : undefined;
-      if (!model) return { error: `WAREORB_AGENT_MODEL=${explicit} is not a known provider/model.` };
+      if (!model) {
+        console.warn(`[agent] WAREORB_AGENT_MODEL=${explicit} is not a known provider/model.`);
+        return { error: `Jarvis is set to use a model that isn't available. ${SETUP_HINT}` };
+      }
       if (rt.hasConfiguredAuth(provider)) return { runtime: rt, model };
-      if (attempt) return { error: `No credentials for ${provider}. ${SETUP_HINT}` };
+      if (attempt) return { error: `Jarvis isn't connected yet. ${SETUP_HINT}` };
       continue;
     }
     for (const c of PREFERRED) {
@@ -63,7 +66,7 @@ async function resolveConfiguredModel(): Promise<Resolved> {
       if (model && rt.hasConfiguredAuth(c.provider)) return { runtime: rt, model };
     }
   }
-  return { error: `No agent provider is configured. ${SETUP_HINT}` };
+  return { error: `Jarvis isn't connected yet. ${SETUP_HINT}` };
 }
 
 let resolver: () => Promise<Resolved> = resolveConfiguredModel;
@@ -83,7 +86,7 @@ let authVersion = 0;
 let credentialEpoch = 0;
 const extractions = new Set<AgentSession>();
 
-export const LOGGED_OUT = "The agent is logged out. Use Log in in Jarvis (or type /login) to connect a Claude API key.";
+export const LOGGED_OUT = "Jarvis is logged out. Use Log in (or type /login) to connect a Claude API key.";
 const DEFAULT_WEB_MODEL = "claude-sonnet-5-5";
 const VERIFY_TIMEOUT_MS = 15_000;
 
@@ -127,7 +130,10 @@ const webModelId = () => {
 export const createWebRuntime: WebRuntimeFactory = async (apiKey) => {
   const rt = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, refreshOnCreate: false });
   const model = rt.getModel("anthropic", webModelId());
-  if (!model) return { error: `The model anthropic/${webModelId()} is not known to this Pi version.` };
+  if (!model) {
+    console.warn(`[agent] anthropic/${webModelId()} is not in the installed model catalogue.`);
+    return { error: `The Claude model ${webModelId()} isn't available in this version of WareOrb.` };
+  }
   await rt.setRuntimeApiKey("anthropic", apiKey);
   return { runtime: rt, model };
 };
@@ -171,7 +177,8 @@ export async function webLogin(rawKey: unknown, signal?: AbortSignal): Promise<L
     connection = { mode: "web", runtime: made.runtime, model: made.model };
     return { ok: true, status: await agentStatus() };
   } catch (e) {
-    return fail(redact(e instanceof Error ? `The key could not be checked: ${e.message}` : "The key could not be checked.", apiKey));
+    console.warn(`[agent] key check failed: ${redact(e instanceof Error ? e.message : String(e), apiKey)}`);
+    return fail("The key could not be checked. Check the internet connection and try again.");
   }
 }
 
@@ -275,18 +282,34 @@ async function newSession(r: { runtime: ModelRuntime; model: Model }, systemProm
   return session;
 }
 
-/** The last assistant error, if the provider refused or failed the request. */
+/**
+ * The last assistant error, if the provider refused or failed the request, as a plain explanation with
+ * the next step. The raw provider message goes to the server log only (redacted), never to the screen.
+ */
 function providerError(session: AgentSession): string | null {
   const last = [...session.messages].reverse().find((m) => m.role === "assistant") as { stopReason?: string; errorMessage?: string } | undefined;
   if (last?.stopReason !== "error") return null;
-  const message = last.errorMessage || "The model provider returned an error";
-  // Expired or revoked logins: point at the one-time operator step, never ask for a key in the browser.
-  return /401|403|unauthori[sz]ed|invalid.*(api key|token|credential)|expired|authentication/i.test(message) ? `The provider rejected the credentials (${message.slice(0, 160)}). ${SETUP_HINT}` : message;
+  const raw = last.errorMessage ?? "";
+  console.warn(`[agent] provider error: ${redact(raw).slice(0, 300)}`);
+  return friendlyProviderError(raw);
+}
+
+export const CREDENTIAL_REJECTED = "Claude rejected the API key (it may have been revoked or lack access). Log out, then use Log in with a valid Claude API key.";
+
+/** Map a provider/network error to what happened and what to do next. */
+export function friendlyProviderError(raw: string): string {
+  if (/401|403|unauthori[sz]ed|invalid.*(api key|x-api-key|token|credential)|expired|authentication|permission/i.test(raw)) return CREDENTIAL_REJECTED;
+  if (/429|rate.?limit/i.test(raw)) return "Claude is rate-limiting this key right now. Wait a moment and ask again.";
+  if (/529|overload|5\d\d|internal server error|unavailable/i.test(raw)) return "Claude is temporarily unavailable. Try again in a moment.";
+  if (/fetch failed|network|ENOTFOUND|ECONN|ETIMEDOUT|timed? ?out|socket|getaddrinfo/i.test(raw)) return "Jarvis couldn't reach Claude. Check the internet connection and try again.";
+  if (/context|too long|max.?tokens|prompt is too long/i.test(raw)) return "This conversation is too long for Claude. Start a new conversation and ask again.";
+  return "Claude couldn't answer this time. Try again, or start a new conversation.";
 }
 
 // ── Warehouse analyst chat ───────────────────────────────────────────────
 
-export const ANALYST_PROMPT = `You are the WareOrb warehouse analyst in a furniture warehouse console. This presentation uses synthetic demo data.
+export const ANALYST_PROMPT = `You are Jarvis, the WareOrb warehouse analyst in a furniture warehouse console. This presentation uses synthetic demo data.
+Refer to yourself only as Jarvis; do not mention the software or SDK you run on.
 You see the warehouse only through your tools: get_inventory, get_movements, get_purchase_orders and analyze_reorder. Call tools before giving any number; never invent stock, sales, costs, capacity or prices.
 For "what/how much should we reorder": call analyze_reorder (and others as needed), then explain per SKU: available (on hand − reserved), incoming purchase orders, net sales in the window and recorded history, the cover target, and the recommended quantity with its cost and bays. The recommended quantities are already feasible together: one shared remaining budget (after open orders at their own cost) and the free bays (after space kept for incoming orders) are allocated in allocationPriority order. Say when an item gets less than its candidate quantity because the shared budget or bays ran out, and report the plan totals and what is left.
 If the data is insufficient (no unit cost, no sales in the window, history shorter than the window), say so plainly and recommend no number for that SKU.
@@ -318,8 +341,8 @@ export function boundedResult(value: unknown): unknown {
 export async function runAnalystTurn(sessionId: string, text: string, tools: () => ToolDefinition[], emit: (e: AgentEvent) => void, signal?: AbortSignal): Promise<void> {
   for (const [id, c] of chats) if (Date.now() - c.at > CHAT_IDLE_MS && !c.busy) { c.session?.dispose(); chats.delete(id); }
   let chat = chats.get(sessionId);
-  if (chat?.busy) return emit({ type: "error", message: "The agent is still answering the previous question. Wait for it or stop it first." });
-  if (!chat && chats.size >= MAX_CHATS) return emit({ type: "error", message: "Too many open agent conversations; restart the demo server." });
+  if (chat?.busy) return emit({ type: "error", message: "Jarvis is still answering the previous question. Wait for it, or press Stop first." });
+  if (!chat && chats.size >= MAX_CHATS) return emit({ type: "error", message: "Jarvis has too many conversations open. Start a new conversation, or restart the demo." });
   // Reserve the conversation before any await, so two simultaneous requests cannot both create one.
   if (!chat) { chat = { session: null, model: "", provider: "", at: Date.now(), busy: true }; chats.set(sessionId, chat); }
   chat.busy = true;
@@ -329,7 +352,7 @@ export async function runAnalystTurn(sessionId: string, text: string, tools: () 
   const epoch = credentialEpoch;
   /** The connection changed (logout or another login) while this turn ran: it must not continue. */
   const stale = () => chat!.retired || epoch !== credentialEpoch;
-  const disconnected = { type: "error" as const, message: "The agent connection changed (log out or new login), so this answer was stopped.", setup: true };
+  const disconnected = { type: "error" as const, message: "Jarvis was logged out or switched to another key, so this answer was stopped. Ask again after logging in.", setup: true };
   try {
     if (!chat.session) {
       const r = await resolveModel();
@@ -356,12 +379,15 @@ export async function runAnalystTurn(sessionId: string, text: string, tools: () 
     if (signal?.aborted) return emit({ type: "cancelled" });
     if (stale()) return emit(disconnected);
     const failure = providerError(session);
-    if (failure) emit({ type: "error", message: failure, ...(failure.includes(SETUP_HINT) ? { setup: true } : {}) });
+    if (failure) emit({ type: "error", message: failure, ...(failure === CREDENTIAL_REJECTED ? { setup: true } : {}) });
     else emit({ type: "done", text: session.getLastAssistantText() ?? "" });
   } catch (e) {
     if (signal?.aborted) emit({ type: "cancelled" });
     else if (stale()) emit(disconnected);
-    else emit({ type: "error", message: e instanceof Error ? e.message : "The agent failed" });
+    else {
+      console.warn(`[agent] turn failed: ${redact(e instanceof Error ? e.message : String(e)).slice(0, 300)}`);
+      emit({ type: "error", message: friendlyProviderError(e instanceof Error ? e.message : "") });
+    }
   } finally {
     signal?.removeEventListener("abort", onAbort);
     unsubscribe();
@@ -401,11 +427,11 @@ export interface ReadInput {
 
 export async function readDeliveryEvidence(input: ReadInput): Promise<{ model: string; draft: unknown } | { error: string }> {
   const epoch = credentialEpoch;
-  const changed = { error: "The agent connection changed (log out or new login) while reading. Read the evidence again." };
+  const changed = { error: "Jarvis was logged out or switched to another key while reading. Log in if needed, then read the evidence again." };
   const r = await resolveModel();
   if ("error" in r) return { error: r.error };
   const images: ImageContent[] = input.evidence.flatMap((e) => (e.data && e.mime?.startsWith("image/") ? [{ type: "image" as const, data: e.data, mimeType: e.mime }] : []));
-  if (images.length && !r.model.input.includes("image")) return { error: `${r.model.provider}/${r.model.id} cannot read photos. Choose a model with image input.` };
+  if (images.length && !r.model.input.includes("image")) return { error: "The connected model can't read photos. Connect a Claude API key with Log in, or enter the counted lines by hand." };
   let draft: unknown = null;
   const submit: ToolDefinition = {
     name: "submit_receipt_draft",
@@ -435,13 +461,14 @@ export async function readDeliveryEvidence(input: ReadInput): Promise<{ model: s
     const seen = Array.isArray(firstUser?.content) ? firstUser.content.filter((c: { type?: string }) => c?.type === "image").length : 0;
     if (seen < images.length) return { error: `${images.length - seen} of ${images.length} photo(s) could not be decoded (damaged or unsupported image). Retake the photo or enter the counted lines by hand.` };
     const failure = providerError(session);
-    if (failure) return { error: `Reading failed: ${failure}` };
+    if (failure) return { error: `Jarvis couldn't read the evidence: ${failure}` };
   } catch (e) {
     if (epoch !== credentialEpoch) return changed;
-    return { error: `Reading failed: ${e instanceof Error ? e.message : "unknown error"}` };
+    console.warn(`[agent] reading failed: ${redact(e instanceof Error ? e.message : String(e)).slice(0, 300)}`);
+    return { error: `Jarvis couldn't read the evidence: ${friendlyProviderError(e instanceof Error ? e.message : "")}` };
   } finally {
     extractions.delete(session);
     session.dispose();
   }
-  return draft ? { model: `${r.model.provider}/${r.model.id}`, draft } : { error: "The model returned no structured draft. Enter the counted lines by hand." };
+  return draft ? { model: `${r.model.provider}/${r.model.id}`, draft } : { error: "Jarvis couldn't turn this evidence into receipt lines. Try a clearer photo or note, or enter the counted lines by hand." };
 }
