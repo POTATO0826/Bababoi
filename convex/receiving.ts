@@ -2,11 +2,12 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { actor, furnitureKind, loc, pkg, receiptLine } from "./schema";
 import { activeBatches, audit, fail, nextCode, skuByCode } from "./lib";
 import { getActor, getViewer } from "./access";
 import { SLOT_BY_ID } from "../src/data/layout";
+import { cleanMeasures } from "../src/domain/measure";
 import { slotCode } from "../src/domain/stock";
 
 const versionOf = (r: { version?: number }) => r.version ?? 1;
@@ -19,6 +20,17 @@ const documentKey = (supplier?: string, docRef?: string) => {
   const ref = docRef && clean(docRef).toUpperCase();
   return ref ? `${clean(supplier ?? "").toUpperCase()}\u0000${ref}` : undefined;
 };
+
+/** Staff-entered measurements: unknown stays empty; an invalid number is refused rather than dropped. */
+function staffMeasures(l: Doc<"receipts">["lines"][number]) {
+  const cleaned = cleanMeasures(l);
+  const numbers = ["packageCount", "itemWeightKg", "packageWeightKg", "statedTotalWeightKg"] as const;
+  const sides = ["lCm", "wCm", "hCm"] as const;
+  if (numbers.some((k) => l[k] != null && cleaned[k] === null) || sides.some((k) => l.packageDimsCm?.[k] != null && cleaned.packageDimsCm?.[k] == null)) {
+    fail(`${l.rawText.slice(0, 40)}: measurements must be positive numbers (package count a whole number); leave unknown values empty`);
+  }
+  return cleaned;
+}
 
 export const generateUploadUrl = mutation({
   args: { actor },
@@ -136,7 +148,7 @@ export const saveLines = mutation({
     if (lines.length > 30) fail("Too many lines");
     if (lines.some(l => !l.key.trim()) || new Set(lines.map((l) => l.key)).size !== lines.length) fail("Line keys must be unique and nonempty");
     await ctx.db.patch("receipts", receiptId, {
-      lines: lines.map(l => ({ ...l, source: "staff" as const })), version: versionOf(r) + 1,
+      lines: lines.map(l => ({ ...l, ...staffMeasures(l), source: "staff" as const })), version: versionOf(r) + 1,
       ...(r.extraction.status === "running" ? { extraction: { status: "idle" as const } } : {}),
     });
     await audit(ctx, actor, "edit_lines", `receipt:${receiptId}`, `${lines.length} lines`);
@@ -378,10 +390,12 @@ export const setExtraction = internalMutation({
       qty: l.qty != null && Number.isSafeInteger(l.qty) && l.qty > 0 ? l.qty : null,
       candidates: l.candidates.filter((c) => known.has(c)).slice(0, 4),
       questions: [...l.questions.slice(0, 4).map(q => q.slice(0, 160)), ...(l.skuCode && !known.has(l.skuCode) ? ["Not in catalogue"] : [])],
-      condition: "good",
+      // Staff confirm the physical condition before posting; a stated problem is kept for them to see.
+      condition: clean(l.condition || "good").slice(0, 60) || "good",
       confidence: Number.isFinite(l.confidence) ? Math.max(0, Math.min(1, l.confidence)) : 0,
       verified: false,
       source: "ai" as const,
+      ...cleanMeasures(l),
     }));
     const supplier = a.supplier ? clean(a.supplier).slice(0, 120) : r.supplier;
     const docRef = a.docRef ? clean(a.docRef).slice(0, 80) : r.docRef;

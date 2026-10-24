@@ -1,10 +1,10 @@
-import { useClerk } from "@clerk/react";
 import { LogOutIcon, UsersIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { WarehouseIcon } from "@/components/common";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { convex, interimIdentity } from "@/convex";
+import { useIdentity } from "@/identity";
 import { cn } from "@/lib/utils";
 import { useWare } from "@/store";
 import { StaffDialog } from "./staff-dialog";
@@ -23,7 +23,8 @@ function useLive() {
 export function Header() {
   const staff = useWare((s) => s.staff);
   const live = useLive();
-  const { signOut } = useClerk();
+  const { mode, signOut } = useIdentity();
+  const manageStaff = staff?.role === "owner" && mode === "clerk";
   const [staffOpen, setStaffOpen] = useState(false);
 
   return (
@@ -34,18 +35,19 @@ export function Header() {
       </div>
       <div className="ml-auto flex min-w-0 items-center gap-2.5">
         {interimIdentity && <Badge variant="warn" title="Clerk development instance: interim sign-in, not the production launch">Interim sign-in</Badge>}
+        {mode === "local-demo" && <Badge variant="warn" title="Runs only on this computer with synthetic data; no sign-in">Local demo · synthetic data</Badge>}
         <span className="hidden h-7 items-center gap-[7px] rounded-full border border-border px-2.5 text-xs text-muted-foreground sm:inline-flex">
           <span className={cn("size-[7px] rounded-full", live ? "animate-blink bg-ok" : "bg-warn")} />
           {live ? "Live" : "Offline"}
         </span>
-        {staff?.role === "owner" && <Button variant="quiet" size="sm" onClick={() => setStaffOpen(true)} aria-label="Manage staff"><UsersIcon /> <span className="hidden sm:inline">Staff</span></Button>}
+        {manageStaff && <Button variant="quiet" size="sm" onClick={() => setStaffOpen(true)} aria-label="Manage staff"><UsersIcon /> <span className="hidden sm:inline">Staff</span></Button>}
         <span className="min-w-0 text-right text-xs leading-tight">
           <strong className="block max-w-[130px] truncate font-medium">{staff?.name}</strong>
           <span className="block capitalize text-muted-foreground">{staff?.role}</span>
         </span>
-        <Button variant="quiet" size="icon-sm" onClick={() => void signOut()} aria-label="Sign out" title="Sign out"><LogOutIcon /></Button>
+        {signOut && <Button variant="quiet" size="icon-sm" onClick={() => void signOut()} aria-label="Sign out" title="Sign out"><LogOutIcon /></Button>}
       </div>
-      {staff?.role === "owner" && <StaffDialog open={staffOpen} onOpenChange={setStaffOpen} />}
+      {manageStaff && <StaffDialog open={staffOpen} onOpenChange={setStaffOpen} />}
     </header>
   );
 }

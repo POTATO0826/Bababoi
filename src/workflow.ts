@@ -1,9 +1,8 @@
 // Derived workflow views over the Convex snapshot: ageing flags, deal turns, map overlay, replenishment.
 import { useEffect, useMemo, useState } from "react";
-import { flagBatches, netSalesBySku, type BatchFlag } from "@/domain/ageing";
+import { flagBatches, type BatchFlag } from "@/domain/ageing";
 import { OPEN_DEAL } from "@/domain/deal";
-import { suggest, type Suggestion } from "@/domain/replenish";
-import { freeSlotSet } from "@/domain/stock";
+import { historyStart, replenishmentRows, type ReplenishRow } from "@/domain/replenish";
 import { DAY, type Role } from "@/domain/types";
 import type { Deal } from "@/ledger";
 import { useWare, type Snapshot, type Stage } from "@/store";
@@ -34,10 +33,7 @@ export const DEAL_STATUS: Record<DealStatus, { label: string; tone: BadgeTone; t
 export const isOpenDeal = (d: Pick<Deal, "status">) => (OPEN_DEAL as readonly string[]).includes(d.status);
 
 /** Only the period with recorded observations can support sales-rate claims. */
-export function historyFrom(ledger: Snapshot): number {
-  if (!ledger.settings.demoMode) return ledger.settings.seededAt;
-  return ledger.movements.reduce((start, movement) => Math.min(start, movement.at), ledger.settings.seededAt);
-}
+export const historyFrom = (ledger: Snapshot): number => historyStart(ledger);
 
 export function flagsOf(ledger: Snapshot | null, now: number): BatchFlag[] {
   if (!ledger) return [];
@@ -57,53 +53,11 @@ export function useFlags() {
   return useMemo(() => flagsOf(ledger, now), [ledger, now]);
 }
 
-export interface ReplenishRow {
-  code: string;
-  title: string;
-  netSales: number;
-  onHand: number;
-  reserved: number;
-  incoming: number;
-  s: Suggestion;
-}
+export type { ReplenishRow };
 
 export function suggestionsOf(ledger: Snapshot | null, now: number): ReplenishRow[] {
   if (!ledger) return [];
-  const { replenish } = ledger.settings;
-  const sales = netSalesBySku(ledger.movements, now - replenish.windowDays * DAY);
-  const historyDays = Math.max(0, Math.floor((now - historyFrom(ledger)) / DAY));
-  const freeBays = freeSlotSet(ledger.batches).size;
-  const openPoSen = ledger.purchaseOrders.reduce((a, p) => {
-    const sku = ledger.skus.find((x) => x.code === p.skuCode);
-    return a + (sku ? (p.qty - p.qtyReceived) * sku.price.unitCostSen : 0);
-  }, 0);
-  const rows = ledger.skus.map((sku) => {
-    const onHand = ledger.batches.filter((b) => b.skuCode === sku.code).reduce((a, b) => a + b.locations.reduce((x, l) => x + l.qty, 0), 0);
-    const reserved = ledger.reservations.filter((r) => r.skuCode === sku.code).reduce((a, r) => a + r.qty, 0);
-    const incoming = ledger.purchaseOrders.filter((p) => p.skuCode === sku.code).reduce((a, p) => a + p.qty - p.qtyReceived, 0);
-    const netSales = sales.get(sku.code) ?? 0;
-    return {
-      code: sku.code,
-      title: `${sku.model} · ${sku.variant}`,
-      netSales,
-      onHand,
-      reserved,
-      incoming,
-      s: suggest({
-        netSales,
-        historyDays,
-        onHand,
-        reserved,
-        incoming,
-        freeBays,
-        cap: sku.cap,
-        unitCostSen: sku.price.unitCostSen,
-        budgetLeftSen: Math.max(0, replenish.budgetSen - openPoSen),
-        rule: replenish,
-      }),
-    };
-  });
-  return rows.filter((r) => r.s.status === "ok" && r.s.suggested > 0).sort((a, b) => b.netSales - a.netSales);
+  return replenishmentRows(ledger, now).filter((r) => r.s.status === "ok" && r.s.suggested > 0).sort((a, b) => b.netSales - a.netSales);
 }
 
 export function useSuggestions() {

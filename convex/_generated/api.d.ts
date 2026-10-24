@@ -17,6 +17,7 @@ import type * as lalamove from "../lalamove.js";
 import type * as ledger from "../ledger.js";
 import type * as lib from "../lib.js";
 import type * as limits from "../limits.js";
+import type * as localDemo from "../localDemo.js";
 import type * as quotes from "../quotes.js";
 import type * as receiving from "../receiving.js";
 import type * as replenish from "../replenish.js";
@@ -38,6 +39,7 @@ declare const fullApi: ApiFromModules<{
   ledger: typeof ledger;
   lib: typeof lib;
   limits: typeof limits;
+  localDemo: typeof localDemo;
   quotes: typeof quotes;
   receiving: typeof receiving;
   replenish: typeof replenish;

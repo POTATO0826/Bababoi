@@ -2,14 +2,16 @@
 // Claude: receipt extraction (structured output), product icons, and Jarvis (tool loop).
 // Jarvis may read, navigate and request delivery quotes. It can never approve, post, collect or book.
 import Anthropic from "@anthropic-ai/sdk";
-import type { FunctionArgs } from "convex/server";
+import type { FunctionArgs, FunctionReturnType } from "convex/server";
 import { v } from "convex/values";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { action, env, internalAction, type ActionCtx } from "./_generated/server";
+import { draftLine, RECEIPT_READING_RULES, type DraftLine } from "../src/domain/receipt-reading";
 import { sanitizeSvg } from "../src/domain/svg";
 import { fit, piecesFor } from "../src/domain/vehicle";
 import { getActionActor } from "./access";
+import { localAgent } from "./localDemo";
 
 const MODEL = () => env.CLAUDE_MODEL || "claude-opus-5";
 // Server-side refusal fallback: a declined request is re-run on Anthropic's recommended model.
@@ -43,7 +45,7 @@ const RECEIPT_SCHEMA: Record<string, unknown> = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["rawText", "skuCode", "candidates", "qty", "confidence", "questions"],
+        required: ["rawText", "skuCode", "candidates", "qty", "confidence", "questions", "condition", "unit", "packageCount", "packageDimsCm", "itemWeightKg", "packageWeightKg", "statedTotalWeightKg"],
         properties: {
           rawText: { type: "string", description: "The line as written or said" },
           skuCode: { type: "string", description: "Catalogue code only when clearly identified, else empty string" },
@@ -51,11 +53,75 @@ const RECEIPT_SCHEMA: Record<string, unknown> = {
           qty: { type: "integer", description: "Quantity as written; 0 if unreadable" },
           confidence: { type: "number", description: "0 to 1" },
           questions: { type: "array", items: { type: "string" }, description: "Short questions for staff about anything unclear" },
+          condition: { type: "string", description: "Condition as stated, else empty string" },
+          unit: { type: ["string", "null"], description: "Counting unit as written (pcs, sets, cartons), else null" },
+          packageCount: { type: ["integer", "null"], description: "Packages delivered for this line as written, else null" },
+          packageDimsCm: {
+            anyOf: [{ type: "null" }, { type: "object", additionalProperties: false, required: ["lCm", "wCm", "hCm"], properties: { lCm: { type: ["number", "null"] }, wCm: { type: ["number", "null"] }, hCm: { type: ["number", "null"] } } }],
+            description: "Size of one package in cm as written, else null",
+          },
+          itemWeightKg: { type: ["number", "null"], description: "Weight of one item as written, else null" },
+          packageWeightKg: { type: ["number", "null"], description: "Weight of one package as written, else null" },
+          statedTotalWeightKg: { type: ["number", "null"], description: "Total weight as written, else null" },
         },
       },
     },
   },
 };
+
+const extractionLine = (l: DraftLine, i: number) => ({
+  ...l,
+  key: `ai${Date.now()}${i}`,
+  condition: l.condition || "good",
+  verified: false,
+  source: "ai" as const,
+});
+
+type ExtractionData = NonNullable<FunctionReturnType<typeof internal.receiving.forExtraction>>;
+type ExtractionResult = Omit<FunctionArgs<typeof internal.receiving.setExtraction>, "receiptId" | "jobVersion">;
+
+/** Local presentation mode: the Pi agent service on this machine reads the evidence with the operator's provider. */
+async function readWithLocalAgent(ctx: ActionCtx, agent: { url: string; secret: string }, data: ExtractionData): Promise<ExtractionResult> {
+  const evidence: { kind: string; mime?: string; data?: string; text?: string; note?: string }[] = [];
+  for (const e of data.evidence) {
+    if (e.storageId && (e.kind === "photo" || e.kind === "document")) {
+      const blob = await ctx.storage.get(e.storageId);
+      const type = e.mime || blob?.type || "";
+      if (blob && IMAGE_TYPES.has(type)) evidence.push({ kind: e.kind, mime: type, data: Buffer.from(await blob.arrayBuffer()).toString("base64") });
+      else evidence.push({ kind: e.kind, note: `A ${type || "file"} is attached; only photos can be read here.` });
+    }
+    if (e.text) evidence.push({ kind: e.kind, text: e.text.slice(0, 4000) });
+    else if (e.kind === "voice") evidence.push({ kind: "voice", note: "A voice recording without a transcript is attached; audio cannot be read here." });
+  }
+  if (!evidence.some((e) => e.data || e.text)) {
+    return { status: "error", error: "Nothing readable yet: add a photo or a voice note with a transcript, or enter the counted lines by hand." };
+  }
+  let res: Response;
+  try {
+    res = await fetch(`${agent.url}/internal/extract-receipt`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${agent.secret}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ catalogue: data.catalogue, evidence }),
+      signal: AbortSignal.timeout(180_000),
+    });
+  } catch {
+    return { status: "error", error: "The local agent service is not reachable. Start the demo with `bun run demo`, or enter the lines by hand." };
+  }
+  const body = (await res.json().catch(() => null)) as { error?: unknown; supplier?: unknown; docRef?: unknown; lines?: unknown; unreadable?: unknown } | null;
+  if (!res.ok || !body) return { status: "error", error: typeof body?.error === "string" ? body.error.slice(0, 300) : `Local agent error ${res.status}` };
+  const lines = (Array.isArray(body.lines) ? body.lines : []).map(draftLine).filter((l): l is DraftLine => l !== null).slice(0, 30);
+  const unreadable = Array.isArray(body.unreadable) ? body.unreadable.filter((u): u is string => typeof u === "string").slice(0, 4) : [];
+  if (!lines.length) {
+    return { status: "error", error: `No goods lines could be read${unreadable.length ? ` (${unreadable.join("; ").slice(0, 200)})` : ""}. Enter the counted lines by hand.` };
+  }
+  if (unreadable.length) lines[0] = { ...lines[0]!, questions: [...lines[0]!.questions, ...unreadable.map((u) => `Unreadable: ${u.slice(0, 140)}`)].slice(0, 6) };
+  return {
+    status: "done",
+    ...(typeof body.supplier === "string" && body.supplier.trim() ? { supplier: body.supplier.trim().slice(0, 80) } : {}),
+    ...(typeof body.docRef === "string" && body.docRef.trim() ? { docRef: body.docRef.trim().slice(0, 40) } : {}),
+    lines: lines.map(extractionLine),
+  };
+}
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
@@ -71,6 +137,8 @@ export const extractReceipt = internalAction({
       return await done({ status: "error", error: "Reading could not start. Check catalogue limits and try again." });
     }
     if (!data) return await done({ status: "error", error: "Reading cancelled because the receipt or requester changed. Ask active staff to retry." });
+    const agent = localAgent();
+    if (agent) return await done(await readWithLocalAgent(ctx, agent, data));
     const anthropic = claude();
     if (!anthropic) return await done({ status: "error", error: "AI reading is off (no ANTHROPIC_API_KEY) — enter lines by hand" });
     if (!(await slot(ctx))) return await done({ status: "error", error: "Busy — try again in a minute" });
@@ -97,35 +165,18 @@ export const extractReceipt = internalAction({
         max_tokens: 8000,
         ...FALLBACK,
         output_config: { effort: "medium", format: { type: "json_schema", schema: RECEIPT_SCHEMA } },
-        system: `You read furniture warehouse delivery notes: photos of handwritten notes, printed documents, and spoken notes in English or Mandarin.
-Turn them into lines for staff to verify. Staff will physically count everything; you only draft.
-Rules: never guess a SKU — use skuCode only when the model and variant clearly match the catalogue, otherwise leave it empty and give candidates plus a question. Never guess a quantity — use 0 when unreadable and ask. Do not infer sizes or weights. Common Chinese words: 沙发 sofa, 桌 table, 椅 chair, 衣柜 wardrobe, 床 bed, 床垫 mattress, 镜 mirror, 灯 lamp.
+        system: `${RECEIPT_READING_RULES}
 Catalogue (code | model | variant | category):
 ${catalogue}`,
         messages: [{ role: "user", content }],
       });
       if (res.stop_reason === "refusal") return await done({ status: "error", error: "Couldn't read this — enter lines by hand" });
-      const parsed = JSON.parse(textOf(res.content)) as {
-        supplier: string;
-        docRef: string;
-        lines: { rawText: string; skuCode: string; candidates: string[]; qty: number; confidence: number; questions: string[] }[];
-      };
+      const parsed = JSON.parse(textOf(res.content)) as { supplier: string; docRef: string; lines: unknown[] };
       await done({
         status: "done",
         ...(parsed.supplier ? { supplier: parsed.supplier.slice(0, 80) } : {}),
         ...(parsed.docRef ? { docRef: parsed.docRef.slice(0, 40) } : {}),
-        lines: parsed.lines.slice(0, 30).map((l, i) => ({
-          key: `ai${Date.now()}${i}`,
-          rawText: l.rawText.slice(0, 200),
-          skuCode: l.skuCode || null,
-          candidates: l.candidates.slice(0, 4),
-          qty: l.qty > 0 ? l.qty : null,
-          condition: "good",
-          confidence: Math.max(0, Math.min(1, l.confidence)),
-          questions: l.questions.slice(0, 4).map((q) => q.slice(0, 160)),
-          verified: false,
-          source: "ai" as const,
-        })),
+        lines: parsed.lines.map(draftLine).filter((l): l is DraftLine => l !== null).slice(0, 30).map(extractionLine),
       });
     } catch (e) {
       await done({ status: "error", error: e instanceof Anthropic.APIError ? `AI error ${e.status}` : "Couldn't read this — enter lines by hand" });

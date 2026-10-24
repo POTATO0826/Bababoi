@@ -1,4 +1,4 @@
-import { SignInButton, useAuth, useClerk, useUser } from "@clerk/react";
+import { SignInButton } from "@clerk/react";
 import { useAction, useConvexAuth, useQuery } from "convex/react";
 import { useEffect, useState } from "react";
 import { api } from "@convex/_generated/api";
@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { WarehouseIcon } from "@/components/common";
 import { errorText, interimIdentity } from "@/convex";
 import { setAuthTokenProvider } from "@/auth-token";
+import { useIdentity } from "@/identity";
 
 // Body grid per docs/design-handoff.md → Layout. `stacked` (<720px) is an addition for phones.
 const COLUMNS = {
@@ -54,22 +55,18 @@ export function App() {
   const { isLoading, isAuthenticated } = useConvexAuth();
   const profile = useQuery(api.access.me, isAuthenticated ? {} : "skip");
   const activate = useAction(api.access.activate);
-  const { signOut } = useClerk();
-  const { getToken, sessionClaims } = useAuth();
-  const { user } = useUser();
+  const identity = useIdentity();
   const [activating, setActivating] = useState(false);
   const [activationError, setActivationError] = useState<string | null>(null);
-  // Clerk's Convex integration puts aud "convex" on the session token; older apps use a "convex" JWT template.
-  const nativeConvexToken = sessionClaims?.aud === "convex";
 
   useEffect(() => {
     if (!isAuthenticated) {
       setAuthTokenProvider(null);
       return;
     }
-    setAuthTokenProvider(() => nativeConvexToken ? getToken() : getToken({ template: "convex" }));
+    setAuthTokenProvider(identity.getToken);
     return () => setAuthTokenProvider(null);
-  }, [getToken, isAuthenticated, nativeConvexToken]);
+  }, [identity, isAuthenticated]);
 
   useEffect(() => {
     if (!isAuthenticated || profile === null) setIdentity(null);
@@ -78,6 +75,11 @@ export function App() {
 
   if (isLoading || (isAuthenticated && profile === undefined)) {
     return <AccessScreen title="Opening WareOrb" description="Checking your staff access…" />;
+  }
+  if (identity.mode === "local-demo" && (!isAuthenticated || !profile)) {
+    return (
+      <AccessScreen title="Local demo is not ready" description="The local WareOrb server could not sign in the presenter. Start everything with `bun run demo` in the project folder, then reload this page." />
+    );
   }
   if (!isAuthenticated) {
     return (
@@ -89,7 +91,7 @@ export function App() {
   if (!profile) {
     return (
       <AccessScreen title="Access pending" description="An owner must invite your verified email address before you can view warehouse records.">
-        <p className="mb-4 text-center text-xs text-muted-foreground">Signed in as {user?.primaryEmailAddress?.emailAddress ?? "your account"}</p>
+        <p className="mb-4 text-center text-xs text-muted-foreground">Signed in as {identity.email ?? "your account"}</p>
         {activationError && <p role="alert" className="mb-3 text-center text-xs text-destructive">{activationError}</p>}
         <Button className="w-full" disabled={activating} onClick={async () => {
           setActivating(true);
@@ -100,7 +102,7 @@ export function App() {
           } catch (e) { setActivationError(errorText(e)); }
           finally { setActivating(false); }
         }}>{activating ? "Checking invitation…" : "Activate invitation"}</Button>
-        <Button variant="ghost" className="mt-2 w-full" onClick={() => void signOut()}>Sign out</Button>
+        <Button variant="ghost" className="mt-2 w-full" onClick={() => void identity.signOut?.()}>Sign out</Button>
       </AccessScreen>
     );
   }

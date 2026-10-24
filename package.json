@@ -6,11 +6,13 @@
   "type": "module",
   "scripts": {
     "dev": "bun --hot src/index.ts",
+    "demo": "bun scripts/demo.ts",
+    "demo:reset": "bun scripts/demo.ts --reset",
     "start": "NODE_ENV=production bun src/index.ts",
     "build": "bun run build.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:backend": "tsc -p convex --noEmit",
-    "test": "bun test src/domain src/voice && vitest run",
+    "test": "bun test src/domain src/voice src/local && vitest run",
     "test:backend": "vitest run",
     "check": "bun run test && bun run typecheck && bun run typecheck:backend && bun run build"
   },
@@ -18,6 +20,7 @@
     "@anthropic-ai/sdk": "^0.131.0",
     "@clerk/react": "^6.18.1",
     "@convex-dev/rate-limiter": "^0.4.2",
+    "@earendil-works/pi-coding-agent": "1.4.0",
     "@fontsource-variable/geist": "^5.2.5",
     "@fontsource-variable/geist-mono": "^5.2.5",
     "@radix-ui/react-slot": "^1.2.3",

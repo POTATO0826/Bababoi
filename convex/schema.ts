@@ -45,6 +45,13 @@ export const receiptLine = v.object({
   questions: v.array(v.string()),
   verified: v.boolean(),
   source: v.union(v.literal("ai"), v.literal("staff"), v.literal("seed")),
+  // Stated measurements (src/domain/measure.ts); null means unknown, never an estimate.
+  unit: v.optional(v.union(v.string(), v.null())),
+  packageCount: v.optional(v.union(v.number(), v.null())),
+  packageDimsCm: v.optional(v.union(v.object({ lCm: v.union(v.number(), v.null()), wCm: v.union(v.number(), v.null()), hCm: v.union(v.number(), v.null()) }), v.null())),
+  itemWeightKg: v.optional(v.union(v.number(), v.null())),
+  packageWeightKg: v.optional(v.union(v.number(), v.null())),
+  statedTotalWeightKg: v.optional(v.union(v.number(), v.null())),
 });
 
 export default defineSchema({

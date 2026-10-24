@@ -17,6 +17,10 @@ const app = defineApp({
     CLERK_JWT_ISSUER_DOMAIN: v.optional(v.string()),
     CLERK_SECRET_KEY: v.optional(v.string()),
     WAREORB_ALLOW_DEMO_SEED: v.optional(v.string()),
+    // Local demo only (scripts/demo.ts sets these on a 127.0.0.1 backend; cloud deployments ignore them).
+    WAREORB_LOCAL_DEMO_JWKS: v.optional(v.string()),
+    WAREORB_LOCAL_AGENT_URL: v.optional(v.string()),
+    WAREORB_LOCAL_AGENT_SECRET: v.optional(v.string()),
   },
 });
 app.use(rateLimiter);

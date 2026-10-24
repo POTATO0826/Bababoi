@@ -1,10 +1,12 @@
 import "./index.css";
 import { ClerkProvider, useAuth } from "@clerk/react";
+import { ConvexProviderWithAuth } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { convex } from "./convex";
+import { ClerkIdentity, DemoIdentity, localDemo, useDemoConvexAuth } from "./identity";
 import { useWare } from "./store";
 
 const elem = document.getElementById("root")!;
@@ -12,10 +14,18 @@ const clerkKey = process.env.BUN_PUBLIC_CLERK_PUBLISHABLE_KEY;
 const convexUrl = process.env.BUN_PUBLIC_CONVEX_URL;
 const app = (
   <StrictMode>
-    {clerkKey && convexUrl ? (
+    {localDemo && convexUrl ? (
+      <ConvexProviderWithAuth client={convex} useAuth={useDemoConvexAuth}>
+        <DemoIdentity>
+          <App />
+        </DemoIdentity>
+      </ConvexProviderWithAuth>
+    ) : clerkKey && convexUrl ? (
       <ClerkProvider publishableKey={clerkKey}>
         <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
-          <App />
+          <ClerkIdentity>
+            <App />
+          </ClerkIdentity>
         </ConvexProviderWithClerk>
       </ClerkProvider>
     ) : (
