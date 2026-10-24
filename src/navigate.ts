@@ -22,7 +22,10 @@ export function applyNavigation(t: NavTarget): string[] {
       traces.push(`Opened ${cmd.label}`);
     } else traces.push(`${cmd?.label ?? t.stage} is not open to ${PEOPLE[role]}`);
   }
-  if (!t.floor) return traces;
+  if (!t.floor) {
+    setWare({ highlight: null });
+    return traces;
+  }
   const highlight = t.slots.length ? { slots: t.slots, label: t.label } : null;
   const floor = t.floor;
   switchFloor(floor, () => {
@@ -50,7 +53,7 @@ function replyFor(t: NavTarget, purpose: string | undefined): string {
   if (purpose === "place") return `${at} has room: ${list}.`;
   const sku = t.sku ? getInventory().byCode.get(t.sku) : undefined;
   if (sku && purpose !== "ageing") return `${sku.model.name} ${sku.variant} is on ${at}${list ? `, ${list}` : ""}. ${sku.onHand} on hand, ${sku.reserved} reserved, ${available(sku)} available.`;
-  if (!t.floor && t.stage) return `${commandById(t.stage)?.label ?? t.stage} is open.`;
+  if (!t.floor && t.stage) return `Opened ${commandById(t.stage)?.label ?? t.stage}.`;
   return `${t.label}.`;
 }
 

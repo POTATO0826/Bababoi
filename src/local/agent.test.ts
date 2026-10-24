@@ -39,7 +39,7 @@ describe("warehouse analyst turn (mocked provider)", () => {
     expect(events.at(-1)).toEqual({ type: "done", text: "Order 4 sofas." });
   });
 
-  test("only the four read-only warehouse tools exist; a shell request fails as an unknown tool", async () => {
+  test("only the five read-only warehouse tools exist; a shell request fails as an unknown tool", async () => {
     const { faux, resolved } = await mockedPi();
     setModelResolverForTests(async () => resolved);
     faux.setResponses([
@@ -49,9 +49,24 @@ describe("warehouse analyst turn (mocked provider)", () => {
     ]);
     const events = await turn("session-tools-1", "Run a shell command");
     const done = events.at(-1) as { type: string; text: string };
-    expect(done).toEqual({ type: "done", text: "tools=analyze_reorder,get_inventory,get_movements,get_purchase_orders" });
+    expect(done).toEqual({ type: "done", text: "tools=analyze_reorder,get_inventory,get_movements,get_purchase_orders,show_in_warehouse" });
     const bash = events.find((e) => e.type === "tool_end" && e.name === "bash") as { isError: boolean } | undefined;
     if (bash) expect(bash.isError).toBe(true);
+  });
+
+  test("show_in_warehouse becomes a navigate event for the browser", async () => {
+    const { faux, resolved } = await mockedPi();
+    setModelResolverForTests(async () => resolved);
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("show_in_warehouse", { category: "sofas", purpose: "place" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Zone A has room."),
+    ]);
+    const events = await turn("session-nav-1", "Where can I put my new sofa?");
+    const nav = events.find((e) => e.type === "navigate") as Extract<AgentEvent, { type: "navigate" }> | undefined;
+    expect(nav).toMatchObject({ floor: 1, zone: "A" });
+    expect(nav!.slots.length).toBeGreaterThan(0);
+    expect(nav!.label).toMatch(/^Floor 1 · Zone A · \d+ free bays?$/);
+    expect(events.findIndex((e) => e.type === "navigate")).toBeGreaterThan(events.findIndex((e) => e.type === "tool_end"));
   });
 
   test("missing credentials give the operator setup step, not a scripted answer", async () => {

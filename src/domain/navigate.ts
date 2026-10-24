@@ -210,13 +210,18 @@ export function navigationTarget(ledger: NavLedger, req: NavRequest, now: number
     }).filter((f) => f.flagged && (!codes.size || codes.has(f.batch.skuCode)));
     const slots = [...new Set(flags.flatMap((f) => f.batch.locations.map((l) => l.slot)))];
     const at = SLOT_BY_ID.get(slots[0] ?? "");
+    const floorOf = (f: (typeof flags)[number]) => SLOT_BY_ID.get(f.batch.locations[0]?.slot ?? "")?.floor;
+    const here = flags.filter((f) => floorOf(f) === at?.floor).length;
+    const elsewhere = flags.length - here;
     return {
       stage: stage ?? "ageing",
       floor: at?.floor ?? null,
       zone: at?.zone ?? null,
       slots,
       ...(sku ? { sku: sku.code } : {}),
-      label: flags.length ? label(where(at?.floor ?? null, at?.zone ?? null), plural(flags.length, "ageing batch", "ageing batches")) : `No ageing ${what}`,
+      label: flags.length
+        ? label(where(at?.floor ?? null, at?.zone ?? null), plural(here, "ageing batch", "ageing batches"), elsewhere > 0 && `${elsewhere} more on Floor ${at?.floor === 1 ? 2 : 1}`)
+        : `No ageing ${what}`,
     };
   }
 
