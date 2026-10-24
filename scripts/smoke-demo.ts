@@ -21,6 +21,8 @@ for (const name of readdirSync(root)) {
 symlinkSync(join(root, "node_modules"), join(fixture, "node_modules"), process.platform === "win32" ? "junction" : "dir");
 const emptyAgent = join(scratch, "agent");
 mkdirSync(emptyAgent);
+const localTmp = join(scratch, "tmp");
+mkdirSync(localTmp);
 const freePort = () => new Promise<number>((ok, no) => {
   const s = createServer();
   s.once("error", no);
@@ -35,6 +37,7 @@ const env = childEnv(process.env, {
   PI_CODING_AGENT_DIR: emptyAgent, PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1",
   WAREORB_CONVEX_NODE: nodeDir,
   HOME: scratch, USERPROFILE: scratch, LOCALAPPDATA: scratch, APPDATA: scratch,
+  TMP: localTmp, TEMP: localTmp, TMPDIR: localTmp,
   XDG_CACHE_HOME: join(scratch, "cache"), XDG_CONFIG_HOME: join(scratch, "config"), XDG_DATA_HOME: join(scratch, "data"),
 });
 let running: ReturnType<typeof Bun.spawn> | undefined;

@@ -23,6 +23,13 @@ try {
   const worker = Bun.spawn([process.execPath, "--no-env-file", join(root, "scripts", "smoke-demo.ts"), scratch], { cwd: root, env, stdin: "ignore", stdout: "inherit", stderr: "inherit" });
   code = await worker.exited;
 } finally {
+  if (process.platform === "win32") {
+    // Detached Convex action executors may outlive the CLI tree and retain a directory handle.
+    const detached = Bun.spawn(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", join(root, "scripts", "stop-startup-fixture.ps1")], { cwd: root, env: { ...env, WAREORB_SMOKE_DIR: scratch }, stdin: "ignore", stdout: "inherit", stderr: "inherit" });
+    const inspectTimer = setTimeout(() => detached.kill(), 15000);
+    try { assert.equal(await detached.exited, 0, "Could not inspect remaining fixture processes"); }
+    finally { clearTimeout(inspectTimer); }
+  }
   const cleanup = Bun.spawn([node, "-e", "require('node:fs').rmSync(process.argv[1],{recursive:true,force:true,maxRetries:20,retryDelay:250})", scratch], { cwd: root, env, stdin: "ignore", stdout: "ignore", stderr: "inherit" });
   const timer = setTimeout(() => cleanup.kill(), 60000);
   try { assert.equal(await cleanup.exited, 0, "Disposable test directory must be removed"); }
