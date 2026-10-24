@@ -32,14 +32,14 @@ type Env = {
   readonly CONVEX_SITE_URL: string;
   readonly ANTHROPIC_API_KEY: string | undefined;
   readonly CLAUDE_MODEL: string | undefined;
+  readonly CLERK_JWT_ISSUER_DOMAIN: string | undefined;
+  readonly CLERK_SECRET_KEY: string | undefined;
   readonly FISH_API_KEY: string | undefined;
   readonly FISH_TTS_MODEL: string | undefined;
   readonly FISH_VOICE_ID: string | undefined;
   readonly LALAMOVE_API_KEY: string | undefined;
   readonly LALAMOVE_API_SECRET: string | undefined;
   readonly LALAMOVE_BASE_URL: string | undefined;
-  readonly CLERK_JWT_ISSUER_DOMAIN: string | undefined;
-  readonly CLERK_SECRET_KEY: string | undefined;
   readonly WAREORB_ALLOW_DEMO_SEED: string | undefined;
 };
 
