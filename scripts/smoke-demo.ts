@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { createServer } from "node:net";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { childEnv } from "../src/local/isolation";
 import { findConvexNode } from "../src/local/node-runtime";
@@ -13,10 +13,18 @@ const nodeDir = findConvexNode({
   exists: existsSync, isDir: (p) => existsSync(p) && statSync(p).isDirectory(), listDir: readdirSync,
   version: (bin) => { const r = Bun.spawnSync([bin, "--version"], { stdout: "pipe", stderr: "ignore" }); return r.exitCode === 0 ? r.stdout.toString() : null; },
 });
-const scratch = mkdtempSync(join(tmpdir(), "wareorb-startup-"));
+// Keep the disposable copy on the checkout's drive. Convex component imports use path.relative;
+// a Windows TEMP on C: with dependencies on D: produces invalid ./D:/... imports.
+const smokeDir = join(root, ".convex");
+mkdirSync(smokeDir, { recursive: true });
+const scratch = mkdtempSync(join(smokeDir, "startup-"));
 const fixture = join(scratch, "checkout");
 const excluded = new Set([".git", "node_modules", ".convex", ".pi", ".vercel", "dist", "out", "backups"]);
-cpSync(root, fixture, { recursive: true, filter: (path) => !excluded.has(basename(path)) && !basename(path).startsWith(".env") && !path.endsWith(".log") });
+const include = (path: string) => !excluded.has(basename(path)) && !basename(path).startsWith(".env") && !path.endsWith(".log");
+mkdirSync(fixture);
+for (const name of readdirSync(root)) {
+  if (include(name)) cpSync(join(root, name), join(fixture, name), { recursive: true, filter: include });
+}
 symlinkSync(join(root, "node_modules"), join(fixture, "node_modules"), process.platform === "win32" ? "junction" : "dir");
 const emptyAgent = join(scratch, "agent");
 mkdirSync(emptyAgent);
