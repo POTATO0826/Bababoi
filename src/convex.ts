@@ -10,6 +10,9 @@ export const convex = new ConvexReactClient(url ?? "https://missing-convex-url.c
 /** HTTP actions (voice) live on the deployment's .site domain. */
 export const convexSiteUrl = process.env.BUN_PUBLIC_CONVEX_SITE_URL ?? (url ?? "").replace(".convex.cloud", ".convex.site");
 
+/** A Clerk development instance is an interim identity stage: staff re-register once the production instance is live. */
+export const interimIdentity = (process.env.BUN_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "").startsWith("pk_test_");
+
 export function errorText(e: unknown) {
   if (e instanceof ConvexError) return typeof e.data === "string" ? e.data : "Request failed";
   return e instanceof Error ? e.message.replace(/^\[CONVEX[^\]]*\]\s*/, "").split("\n")[0]! : "Request failed";

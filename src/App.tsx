@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import { getWare, setIdentity, useWare, type StaffProfile } from "@/store";
 import { Button } from "@/components/ui/button";
 import { WarehouseIcon } from "@/components/common";
-import { errorText } from "@/convex";
+import { errorText, interimIdentity } from "@/convex";
 import { setAuthTokenProvider } from "@/auth-token";
 
 // Body grid per docs/design-handoff.md → Layout. `stacked` (<720px) is an addition for phones.
@@ -55,19 +55,21 @@ export function App() {
   const profile = useQuery(api.access.me, isAuthenticated ? {} : "skip");
   const activate = useAction(api.access.activate);
   const { signOut } = useClerk();
-  const { getToken } = useAuth();
+  const { getToken, sessionClaims } = useAuth();
   const { user } = useUser();
   const [activating, setActivating] = useState(false);
   const [activationError, setActivationError] = useState<string | null>(null);
+  // Clerk's Convex integration puts aud "convex" on the session token; older apps use a "convex" JWT template.
+  const nativeConvexToken = sessionClaims?.aud === "convex";
 
   useEffect(() => {
     if (!isAuthenticated) {
       setAuthTokenProvider(null);
       return;
     }
-    setAuthTokenProvider(() => getToken({ template: "convex" }));
+    setAuthTokenProvider(() => nativeConvexToken ? getToken() : getToken({ template: "convex" }));
     return () => setAuthTokenProvider(null);
-  }, [getToken, isAuthenticated]);
+  }, [getToken, isAuthenticated, nativeConvexToken]);
 
   useEffect(() => {
     if (!isAuthenticated || profile === null) setIdentity(null);
@@ -111,6 +113,7 @@ function AccessScreen({ title, description, children }: { title: string; descrip
       <div className="mx-auto mb-5 flex size-12 items-center justify-center rounded-xl border border-border-strong bg-raised-2 text-brand"><WarehouseIcon /></div>
       <h1 className="text-center text-xl font-semibold">{title}</h1>
       <p className="mt-2 mb-6 text-center text-sm text-muted-foreground">{description}</p>
+      {interimIdentity && <p className="mb-4 rounded-md border border-warn/40 px-3 py-2 text-center text-xs text-warn">Interim sign-in (Clerk development instance). Not the production launch.</p>}
       {children}
     </section>
   </main>;

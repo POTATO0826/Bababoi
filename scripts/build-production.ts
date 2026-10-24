@@ -19,7 +19,11 @@ if (!/^pk_(test|live)_/.test(process.env.BUN_PUBLIC_CLERK_PUBLISHABLE_KEY!)) {
 }
 if (process.env.VERCEL_ENV === "production") {
   if (!process.env.BUN_PUBLIC_CLERK_PUBLISHABLE_KEY!.startsWith("pk_live_")) {
-    throw new Error("Production requires the Clerk production application's publishable key.");
+    // Interim stage until the business domain exists: the site and sign-in screen are labelled, and staff re-register later.
+    if (process.env.WAREORB_INTERIM_CLERK_DEVELOPMENT !== "acknowledged") {
+      throw new Error("Production requires the Clerk production application's publishable key.");
+    }
+    console.warn("WARNING: interim release on a Clerk development instance. This is not the production launch.");
   }
   if (cloud.hostname === "admired-swordfish-390.convex.cloud") {
     throw new Error("This is the shared demonstration deployment. Select the separate business deployment.");
