@@ -15,10 +15,10 @@
 
 | Field                  | Details                                                   |
 | ---------------------- | --------------------------------------------------------- |
-| **Team Name**          | _TODO_                                                    |
+| **Team Name**          | Bababoi                                                    |
 | **Team Domain**        | Domain 2 — Orbyte Smart SME Challenge                     |
-| **SDG Track (1–17)**   | SDG 8 — Decent Work and Economic Growth (targets 8.2, 8.3) |
-| **Team Leader**        | _TODO_                                                    |
+| **SDG Track (1–17)**   | SDG 8 and SDG 9 |
+| **Team Leader**        | Alfred Lee Khai Zher                                           |
 | **University**         | Taylor's University                                       |
 | **Number of Members**  | 3                                                         |
 
@@ -112,7 +112,7 @@ Convex — stock ledger, deals, quotes, receiving, replenish, audit log
 
 ## How to Run
 
-## Run on Windows, macOS or Linux
+### Option 1 — Run Locally (Windows, macOS or Linux)
 
 Install **Bun 1.4.3 or newer** from [bun.sh](https://bun.sh/docs/installation) and **Node.js 24 LTS** from [nodejs.org](https://nodejs.org/en/download). Reopen the terminal after installation. On macOS, Homebrew users can run `brew install bun node@24`.
 
