@@ -184,7 +184,7 @@ Live (real provider via an Anthropic API key in the process environment; Pi subs
 - A blurred photo gave no lines, with the reason. An invalid key gave "The provider rejected the
   credentials (401 …)" with the setup steps.
 
-Still pending (needs the presentation Mac):
+Pending at the end of the Cloud run (see the Mac follow-up below):
 
 - A real local Convex backend: the Cloud runner's egress proxy blocks the github.com binary
   download (HTTP 403).
@@ -193,3 +193,42 @@ Still pending (needs the presentation Mac):
 - Real handwriting and a real microphone with Chrome speech recognition.
 
 Use the smoke test above for these.
+
+## Mac follow-up acceptance (24 October 2026)
+
+An isolated checkout of `265e810` was tested with a real accountless local Convex backend.
+The original checkout, video work and cloud deployments were not changed. Ports 3230 (web),
+3231 (Convex) and 3232 (HTTP actions) kept this run separate from the existing preview.
+
+The first full-app launch exposed a blank page: `process is not defined`. The demo runner did not
+provide `BUN_PUBLIC_CLERK_PUBLISHABLE_KEY`, so Bun left the optional key's `process.env` references
+in the browser bundle. The runner now explicitly supplies an empty public Clerk key. A regression
+test builds the actual frontend with the runner's child environment and `.env` loading disabled;
+it failed before the fix with that unresolved reference and passes afterwards. Hosted authentication
+configuration is unchanged.
+
+Fresh checks after the fix: **158 Bun tests and 61 Convex tests pass**, both typechecks pass, the
+production build passes, and `git diff --check` passes. An independent reviewer also ran the
+14 demo-runner tests and found no actionable issue.
+
+Observed in the complete browser app against the real local database:
+
+- No login screen; "Local demo · synthetic data" and the owner presenter are shown.
+- The seeded warehouse contains 43 SKUs and 375 units.
+- A new receipt (`MAC-ACCEPT-20261024`, local synthetic acceptance data) was entered manually:
+  2 × `CHAIR-LUMA-0410`, 1 package measuring 90 × 60 × 45 cm, 6 kg per item, good condition,
+  2 counted units allocated to A-3-03, and the checked confirmation.
+- `6kg` is rejected with an explicit input error and disables saving; `6` produces **12 kg**
+  and **0.243 m³**. Blank weight fields stay unknown. A future received time is rejected.
+- Saving and posting succeeds; the receipt becomes Posted and inventory rises to **377**.
+  The posted form has no post button, preventing another UI submission.
+- After Ctrl+C and restarting without `--reset`, the runner reports keeping the existing data.
+  The browser still shows 377 units and the posted receipt, measurements, allocation and audit history.
+- Without Pi credentials, an actual chat request shows "Agent not connected" and setup instructions;
+  it does not return a fabricated warehouse answer.
+
+Still unverified on this Mac: a live Pi subscription/provider turn and its tool cards, real handwritten
+photo extraction, and microphone recording/transcription. Pi was not logged in, and no credentials
+were read or copied. Cloud's live Anthropic evidence above is separate from these remaining checks.
+Duplicate-post idempotency remains covered by automated backend tests, not a repeated live HTTP post
+in this walkthrough.

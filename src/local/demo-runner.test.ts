@@ -1,5 +1,6 @@
-// The local demo start-up, driven entirely through mocked CLI / fetch / file spies (no real processes).
+// The local demo start-up uses mocked CLI / fetch / file spies. One regression builds the real browser bundle.
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import { DemoError, runDemo, type DemoDeps } from "./demo-runner";
 import { IsolationError } from "./isolation";
 
@@ -111,6 +112,23 @@ describe("cloud selectors and URLs stop the demo before any write or request", (
 });
 
 describe("a clean start", () => {
+  test("the real frontend bundle has no unresolved public environment references without Clerk", async () => {
+    const h = harness();
+    await runDemo(h.deps);
+    const web = h.starts.find((s) => s.cmd.includes("src/index.ts"))!;
+    const script = `
+      import tailwind from "bun-plugin-tailwind";
+      const result = await Bun.build({ entrypoints: ["src/index.html"], target: "browser", plugins: [tailwind], env: "BUN_PUBLIC_*", minify: true, define: { "process.env.NODE_ENV": JSON.stringify("production") } });
+      const js = (await Promise.all(result.outputs.filter(o => o.path.endsWith(".js")).map(o => o.text()))).join("\\n");
+      console.log(JSON.stringify({ success: result.success, unresolved: [...new Set(js.match(/process\\.env\\.BUN_PUBLIC_[A-Z_]+/g) ?? [])] }));
+    `;
+    const built = Bun.spawnSync([process.execPath, "--no-env-file", "-e", script], {
+      cwd: join(import.meta.dir, "../.."), env: web.env, stdout: "pipe", stderr: "pipe", timeout: 20_000,
+    });
+    expect(built.exitCode).toBe(0);
+    expect(JSON.parse(built.stdout.toString())).toEqual({ success: true, unresolved: [] });
+  }, 25_000);
+
   test("ambient cloud selectors never reach the CLI or the server, and every request goes to 127.0.0.1", async () => {
     const h = harness({ ambient: { CONVEX_DEPLOY_KEY: "prod:lemur|secret", CONVEX_DEPLOYMENT: "prod:descriptive-lemur-152", CONVEX_SELF_HOSTED_URL: "https://x", CLERK_SECRET_KEY: "sk_test_x", BUN_PUBLIC_CONVEX_URL: "https://admired-swordfish-390.convex.cloud" } });
     const demo = await runDemo(h.deps);
