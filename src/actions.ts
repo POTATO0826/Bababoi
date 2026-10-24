@@ -18,6 +18,7 @@ import { SLOT_BY_ID } from "@/data/layout";
 import { localDemo } from "@/identity";
 import { fetchAgentStatus, loginAgent, logoutAgent, providerLabel, streamAgentChat } from "@/local/agent-client";
 import { actorNow, getInventory, getWare, setWare, type AgentTurn, type TranscriptLine, type ViewMode } from "@/store";
+import { applyNavigation, navigateFromText } from "@/navigate";
 import { scanToReceipt } from "@/scan";
 import { recordUtterance, say, stopSpeaking, transcribe } from "@/voice/voice";
 
@@ -50,7 +51,7 @@ export function switchFloor(floor: FloorId, after?: () => void) {
   }
   setWare({ fading: true, hoverBay: null });
   later(() => {
-    setWare({ floor, fading: false, zone: null, selected: null, zoomMul: 1 });
+    setWare({ floor, fading: false, zone: null, selected: null, zoomMul: 1, highlight: null });
     after?.();
   }, 260);
 }
@@ -62,7 +63,7 @@ export function zoomZone(zone: ZoneId) {
 
 /** Back / "View whole warehouse" / "Main Warehouse" crumb. */
 export function backToOverview() {
-  setWare({ zone: null, selected: null, zoomMul: 1, hoverBay: null });
+  setWare({ zone: null, selected: null, zoomMul: 1, hoverBay: null, highlight: null });
 }
 
 /** Esc keeps the selection; it only pulls the camera back out. */
@@ -324,9 +325,13 @@ export async function runCommand(text: string) {
     return;
   }
   setWare({ orb: "thinking" });
+  // "Take me there" never waits on (or needs) a model: move the screen now, let the model add detail.
+  const nav = navigateFromText(t);
   // Local demo: free text goes only to the Pi warehouse analyst. If it is not connected, the reply
-  // says so and how to fix it; there is no scripted stand-in.
+  // says so and how to fix it; there is no scripted stand-in. The map move above is not an answer, so
+  // without an agent only what was shown on screen is reported.
   if (localDemo) {
+    if (nav && !getWare().localAgent?.ready) pushLine("ai", nav.reply, nav.traces);
     await askLocalAgent(t, my);
     return;
   }
@@ -343,14 +348,16 @@ export async function runCommand(text: string) {
       ]);
       if (my !== session) return;
       if (r && !r.unavailable) {
-        speak(r.reply || "Done.", applyEffects(r.effects));
+        speak(r.reply || nav?.reply || "Done.", [...new Set([...(nav?.traces ?? []), ...applyEffects(r.effects)])]);
         return;
       }
     } catch {
       // fall through to offline rules
     }
   }
-  if (my === session) answerOffline(t.toLowerCase());
+  if (my !== session) return;
+  if (nav) speak(nav.reply, nav.traces);
+  else answerOffline(t.toLowerCase());
 }
 
 // ── Local Pi agent (local demo mode) ──────────────────────────────────────
@@ -483,6 +490,11 @@ async function askLocalAgent(text: string, my: number) {
         case "cancelled":
           updateLine(id, (l) => withTurn(l, (a) => ({ state: "cancelled", tools: a.tools.map((t) => (t.state === "running" ? { ...t, state: "error" as const } : t)) })));
           break;
+        case "navigate": {
+          const { type: _, ...target } = e;
+          applyNavigation(target);
+          break;
+        }
       }
     });
     if (my !== session || myAuth !== authEpoch) return;

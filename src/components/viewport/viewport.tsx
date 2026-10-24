@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, ChevronDownIcon, ChevronRightIcon, PanelRightIcon, ScanIcon } from "lucide-react";
+import { ArrowLeftIcon, ChevronDownIcon, ChevronRightIcon, PanelRightIcon, ScanIcon, XIcon } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { backToOverview, escapeZone, resetCamera, setView, switchFloor } from "@/actions";
 import { DetailHost } from "@/components/detail/detail-host";
@@ -10,6 +10,7 @@ import { totals, type FloorId } from "@/data/catalog";
 import { useElementSize } from "@/hooks/use-layout";
 import { cn } from "@/lib/utils";
 import { getWare, setWare, useInventory, useWare, type ViewMode } from "@/store";
+import { clearHighlight } from "@/navigate";
 import { useBayOverlay } from "@/workflow";
 
 const WarehouseCanvas = lazy(() => import("@/scene/warehouse-canvas"));
@@ -97,6 +98,7 @@ export function Viewport({ className }: { className?: string }) {
       </div>
 
       <Hud tight={tight} veryTight={veryTight} />
+      <HighlightChip veryTight={veryTight} />
       {(width === 0 || width >= 520) && <Legend showStats={width >= 700 && !zone} />}
 
       {panelOpen && !detail && <DetailsPanel veryTight={veryTight} />}
@@ -119,6 +121,29 @@ export function Viewport({ className }: { className?: string }) {
         </Button>
       )}
     </main>
+  );
+}
+
+/** "Showing Floor 1 · Zone A · 4 free bays" while Jarvis points at bays. */
+function HighlightChip({ veryTight }: { veryTight: boolean }) {
+  const label = useWare((s) => s.highlight?.label);
+  if (!label) return null;
+  return (
+    <div
+      role="status"
+      onPointerDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      className={cn(
+        "absolute left-3 z-[4] flex h-7 max-w-[calc(100%-24px)] animate-fade-up items-center gap-1.5 rounded-md border border-brand/40 bg-panel pr-1 pl-2.5 text-[12px] whitespace-nowrap text-foreground",
+        veryTight ? "top-[92px]" : "top-[52px]",
+      )}
+    >
+      <span className="size-2 flex-none rounded-[2px] bg-brand" />
+      <span className="min-w-0 truncate">Showing {label}</span>
+      <Button variant="quiet" size="icon-xs" onClick={clearHighlight} aria-label="Clear highlight" className="size-5">
+        <XIcon />
+      </Button>
+    </div>
   );
 }
 

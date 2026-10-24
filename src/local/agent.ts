@@ -19,6 +19,7 @@ import {
   type ResourceLoader,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import type { NavTarget } from "../domain/navigate";
 import { RECEIPT_READING_RULES } from "../domain/receipt-reading";
 
 process.env.PI_TELEMETRY ??= "0";
@@ -310,9 +311,10 @@ export function friendlyProviderError(raw: string): string {
 
 export const ANALYST_PROMPT = `You are Jarvis, the WareOrb warehouse analyst in a furniture warehouse console. This presentation uses synthetic demo data.
 Refer to yourself only as Jarvis; do not mention the software or SDK you run on.
-You see the warehouse only through your tools: get_inventory, get_movements, get_purchase_orders and analyze_reorder. Call tools before giving any number; never invent stock, sales, costs, capacity or prices.
+You see the warehouse only through your tools: get_inventory, get_movements, get_purchase_orders, analyze_reorder and show_in_warehouse. Call tools before giving any number; never invent stock, sales, costs, capacity or prices.
 For "what/how much should we reorder": call analyze_reorder (and others as needed), then explain per SKU: available (on hand − reserved), incoming purchase orders, net sales in the window and recorded history, the cover target, and the recommended quantity with its cost and bays. The recommended quantities are already feasible together: one shared remaining budget (after open orders at their own cost) and the free bays (after space kept for incoming orders) are allocated in allocationPriority order. Say when an item gets less than its candidate quantity because the shared budget or bays ran out, and report the plan totals and what is left.
 If the data is insufficient (no unit cost, no sales in the window, history shorter than the window), say so plainly and recommend no number for that SKU.
+When the user asks where something is, where new stock can go, or to see a stage (receive, ageing, deals, delivery quotes, approvals, collection, replenish), call show_in_warehouse so their screen moves there, then answer.
 You cannot post stock, record purchases or dispatch goods. When something should be ordered, say that a person records the confirmed supplier purchase in Replenish.
 Reply briefly in the user's language (English or Chinese). Money in RM.`;
 
@@ -321,9 +323,18 @@ export type AgentEvent =
   | { type: "text"; delta: string }
   | { type: "tool_start"; id: string; name: string; args: unknown }
   | { type: "tool_end"; id: string; name: string; isError: boolean; result: unknown; ms?: number }
+  /** show_in_warehouse succeeded: the browser moves to this stage, floor, zone and bays. */
+  | ({ type: "navigate" } & NavTarget)
   | { type: "done"; text: string }
   | { type: "cancelled" }
   | { type: "error"; message: string; setup?: boolean };
+
+/** The screen target from a successful show_in_warehouse result, else null. */
+export function navigateOf(toolName: string, isError: boolean, result: unknown): NavTarget | null {
+  if (toolName !== "show_in_warehouse" || isError || !result || typeof result !== "object") return null;
+  const t = (result as { navigate?: NavTarget }).navigate;
+  return t && Array.isArray(t.slots) ? t : null;
+}
 
 interface Chat { session: AgentSession | null; model: string; provider: string; modelName?: string; subscription?: boolean; at: number; busy: boolean; retired?: boolean }
 const chats = new Map<string, Chat>();
@@ -373,7 +384,12 @@ export async function runAnalystTurn(sessionId: string, text: string, tools: () 
       if (stale()) return;
       if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") emit({ type: "text", delta: event.assistantMessageEvent.delta });
       else if (event.type === "tool_execution_start") emit({ type: "tool_start", id: event.toolCallId, name: event.toolName, args: boundedResult(event.args) });
-      else if (event.type === "tool_execution_end") emit({ type: "tool_end", id: event.toolCallId, name: event.toolName, isError: event.isError, result: boundedResult(event.result?.details ?? event.result), ms: event.durationMs });
+      else if (event.type === "tool_execution_end") {
+        const result = event.result?.details ?? event.result;
+        emit({ type: "tool_end", id: event.toolCallId, name: event.toolName, isError: event.isError, result: boundedResult(result), ms: event.durationMs });
+        const target = navigateOf(event.toolName, event.isError, result);
+        if (target) emit({ type: "navigate", ...target });
+      }
     });
     await session.prompt(text);
     if (signal?.aborted) return emit({ type: "cancelled" });

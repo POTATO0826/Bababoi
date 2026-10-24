@@ -6,6 +6,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { api } from "../../convex/_generated/api";
 import { SLOT_BY_ID } from "../data/layout";
 import { netSalesBySku } from "../domain/ageing";
+import { NAV_STAGES, navigationTarget, type NavRequest } from "../domain/navigate";
 import { historyStart, replenishmentPlan } from "../domain/replenish";
 import { batchQty, freeSlotSet, slotCode } from "../domain/stock";
 import { DAY } from "../domain/types";
@@ -133,6 +134,13 @@ export function reorderView(s: Snapshot, p: { sku?: string }, now: number) {
   };
 }
 
+/** Where the screen should go. Same rule as the browser's offline matcher; reads only. */
+export function showInWarehouseView(s: Snapshot, p: NavRequest, now: number) {
+  const target = navigationTarget(s, p, now);
+  if ("error" in target) return target;
+  return { navigate: target, note: "The screen now shows this. Nothing was changed." };
+}
+
 const text = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: value });
 
 /** Pi tool definitions. `snapshot` must fetch fresh data on every call. */
@@ -165,6 +173,24 @@ export function warehouseTools(snapshot: () => Promise<Snapshot | null>, now: ()
       description: "The warehouse replenishment plan (the same one the Replenish panel shows): per SKU, sales in the window → cover target, minus available and incoming; then one shared remaining budget (after open orders at their own cost) and the free bays (after space kept for incoming orders) are allocated across SKUs in priority order, so recommended quantities are feasible together. Marks items with insufficient data and returns the exact inputs used.",
       parameters: Type.Object({ sku: Type.Optional(Type.String({ description: "Limit to one SKU" })) }),
       execute: async (_id, p) => read((s) => reorderView(s, p as { sku?: string }, now())),
+    },
+    {
+      name: "show_in_warehouse", label: "Show in warehouse",
+      description:
+        "Move the user's screen to what they asked about: open a stage, fly the 3D map to a floor and zone, and highlight bays. " +
+        "Use purpose 'place' for where new stock can go (free bays from the receiving placement rule), 'ageing' for ageing batches, 'locate' (default) for where stock is. Changes no data.",
+      parameters: Type.Object({
+        stage: Type.Optional(Type.Union(NAV_STAGES.map((st) => Type.Literal(st)), { description: "Stage to open; inventory = just the map" })),
+        sku: Type.Optional(Type.String({ description: "Exact SKU code" })),
+        category: Type.Optional(Type.Union(["sofas", "tables", "chairs", "wardrobes", "beds", "general"].map((c) => Type.Literal(c)))),
+        search: Type.Optional(Type.String({ description: "Model/variant words when no single SKU is meant, e.g. 'mirror'" })),
+        zone: Type.Optional(Type.String({ description: "Zone, e.g. 'A' or '2B'" })),
+        floor: Type.Optional(Type.Union([Type.Literal(1), Type.Literal(2)])),
+        bays: Type.Optional(Type.Array(Type.String(), { description: "Bay codes like A-1-03" })),
+        purpose: Type.Optional(Type.Union([Type.Literal("locate"), Type.Literal("place"), Type.Literal("ageing")])),
+        qty: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000, description: "Units to place (purpose 'place')" })),
+      }),
+      execute: async (_id, p) => read((s) => showInWarehouseView(s, p as NavRequest, now())),
     },
   ];
 }

@@ -169,7 +169,7 @@ export interface ReplenishPlan {
 }
 
 /** Only the period with recorded observations can support sales-rate claims. */
-export function historyStart(l: Pick<ReplenishLedger, "settings" | "movements">): number {
+export function historyStart(l: { settings: Pick<ReplenishLedger["settings"], "demoMode" | "seededAt">; movements: ReplenishLedger["movements"] }): number {
   if (!l.settings.demoMode) return l.settings.seededAt;
   return l.movements.reduce((start, movement) => Math.min(start, movement.at), l.settings.seededAt);
 }

@@ -103,6 +103,8 @@ export interface WareState {
   selected: string | null; // SKU code
   openCat: CategoryId | null;
   hoverBay: string | null;
+  /** Bays Jarvis is pointing at ("where can I put a sofa?"), with the chip text. Cleared by the chip or Back. */
+  highlight: { slots: string[]; label: string } | null;
   query: string;
   /** Details popup inside the viewport. */
   panelOpen: boolean;
@@ -168,6 +170,7 @@ export const useWare = create<WareState>()(() => ({
   selected: null,
   openCat: "sofas",
   hoverBay: null,
+  highlight: null,
   query: "",
   panelOpen: false,
   receiveOpen: false,
@@ -195,7 +198,7 @@ export function setIdentity(staff: StaffProfile | null) {
     staff,
     role: staff?.role ?? "warehouse",
     ...(s.staff?._id !== staff?._id || s.staff?.role !== staff?.role || !staff
-      ? { transcript: [], detail: null, stage: "inventory" as Stage, ledger: null, ledgerReady: false, skus: [], selected: null, agentOpen: false, receiveOpen: false }
+      ? { transcript: [], detail: null, stage: "inventory" as Stage, ledger: null, ledgerReady: false, skus: [], selected: null, highlight: null, agentOpen: false, receiveOpen: false }
       : {}),
   }));
 }

@@ -79,7 +79,10 @@ const PAD = 0.3;
 
 const STATE_COLOR: Record<BayState, string> = { ageing: "#a78bfa", reserved: "#2dd4bf", freed: "#22c55e" };
 
-function padStyle(bay: Bay, selected: string | null, hover: string | null, threshold: number, state?: BayState) {
+/** Jarvis's pointer ("free bays for a sofa"): drawn over every other state so it reads at a glance. */
+const LIT = { fill: "#4f8bea", stroke: "#bcd3fb" };
+
+function padStyle(bay: Bay, selected: string | null, hover: string | null, threshold: number, state?: BayState, lit = false) {
   const s = bay.sku;
   let fill = "#ffffff";
   let fillOpacity = 0.035;
@@ -110,6 +113,13 @@ function padStyle(bay: Bay, selected: string | null, hover: string | null, thres
     stroke = "#e3bd78";
     width = 1.3;
   }
+  if (lit) {
+    fill = LIT.fill;
+    fillOpacity = s ? 0.34 : 0.22;
+    stroke = LIT.stroke;
+    width = 2.2;
+    dashed = false;
+  }
   if (hover === bay.id) {
     stroke = "#fafafa";
     width = 1.6;
@@ -121,7 +131,8 @@ function BayPad({ bay, state }: { bay: Bay; state?: BayState }) {
   const selected = useWare((s) => s.selected);
   const hover = useWare((s) => s.hoverBay);
   const threshold = useWare((s) => s.settings.lowStockThreshold);
-  const st = padStyle(bay, selected, hover, threshold, state);
+  const lit = useWare((s) => !!s.highlight?.slots.includes(bay.id));
+  const st = padStyle(bay, selected, hover, threshold, state, lit);
   const [x0, z0, x1, z1] = bay.rect;
   const points = useMemo(() => rectLoop([x0 - PAD, z0 - PAD, x1 + PAD, z1 + PAD], 0.035), [x0, z0, x1, z1]);
   return (
@@ -273,8 +284,9 @@ export function BaysLayer({ floor }: { floor: FloorId }) {
   const inbound = useInbound();
   const overlay = useBayOverlay();
   const showEmpty = useWare((s) => s.settings.showEmptyBays);
+  const lit = useWare((s) => s.highlight?.slots);
   const all = useInventory().bays[floor];
-  const bays = all.filter((b) => showEmpty || b.sku || overlay.has(b.id));
+  const bays = all.filter((b) => showEmpty || b.sku || overlay.has(b.id) || lit?.includes(b.id));
   return (
     <group>
       {ZONE_IDS.map((z) => (
