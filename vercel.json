@@ -1,5 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": {
+    "deploymentEnabled": {
+      "main": false
+    }
+  },
   "framework": null,
   "installCommand": "bun install --frozen-lockfile",
   "buildCommand": "bunx convex deploy --cmd 'bun scripts/build-production.ts' --cmd-url-env-var-name BUN_PUBLIC_CONVEX_URL",
