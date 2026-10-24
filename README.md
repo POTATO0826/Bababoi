@@ -29,7 +29,7 @@
 | GitHub Repository | https://github.com/POTATO0826/Bababoi |
 | Live Demo         | https://wareorb-demo.vercel.app/      |
 | Slide Deck        | https://canva.link/23u3t20hv0yk7dx    |
-| Demo Video        | _TODO_                                |
+| Demo Video        | https://youtu.be/it00xkj2OQo          |
 
 ---
 
