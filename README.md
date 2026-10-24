@@ -163,13 +163,13 @@ GitHub Actions runs `check` and `test:startup` on Windows, macOS and Linux, plus
 
 _TODO: describe how the team used Replit (development, hosting, secrets)._
 
-📄 Proof of use: [`replit/SDC2026_TeamName_Replit_POU.pdf`](replit/SDC2026_TeamName_Replit_POU.pdf)
+📄 Proof of use: [`replit/SDC2026_TeamName_Replit_POU.pdf`](replit)
 
 ## How We Use RunPod *(Required)*
 
 _TODO: describe the RunPod workload, setup and integration._
 
-📄 Proof of use: [`submission/SDC2026_TeamName_Runpod_POU.pdf`](submission/SDC2026_TeamName_Runpod_POU.pdf)
+📄 Proof of use: [`submission/SDC2026_TeamName_Runpod_POU.pdf`](replit)
 
 ---
 
