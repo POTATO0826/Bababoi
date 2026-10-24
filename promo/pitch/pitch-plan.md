@@ -1,6 +1,6 @@
 # WareOrb pitch video: Stage B plan
 
-**Draft for the user's approval, 24 Oct 2026.** Nothing has been recorded or rendered for the pitch. Recording starts only after this plan is approved and decisions A–E in §1 are answered.
+**Approved by the user on 24 Oct 2026, with decisions A–E as recommended.** Decision A, the Clerk exception, covers a Clerk development instance used only to sign in test accounts. Nothing has been recorded or rendered for the pitch yet. The draft before approval is commit `608117a`.
 
 | | |
 |---|---|
@@ -32,7 +32,7 @@ These are facts read from the code at `e935ae6`, compared with the `Vince` build
 
 ---
 
-## 1 · Decisions needed before recording
+## 1 · Decisions (approved 24 Oct 2026: A–E as recommended)
 
 **A · Clerk sign-in is an external service, so it needs your exception.**
 
@@ -354,4 +354,4 @@ Added for `e935ae6`:
   * their review of `problem-solution.md`, together with decisions D and E;
   * who narrates;
   * when the WAVs will arrive.
-* **Decisions A–E** above.
+* **Decisions A–E** were approved as recommended on 24 Oct 2026. The team's Clerk setup is next (§5).
