@@ -9,7 +9,7 @@
 
 > An open-source 3D warehouse with an AI assistant. It helps small retailers turn ageing stock into approved sales and free up shelf space, with the owner in control.
 
-[Live demo](https://wareorb-demo.vercel.app/) · [Demo video](https://youtu.be/it00xkj2OQo) · [Apache 2.0](LICENSE)
+[Live demo](https://wareorb-demo.vercel.app/) · [Apache 2.0](LICENSE)
 
 ---
 
