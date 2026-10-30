@@ -88,6 +88,9 @@ export async function runDemo(d: DemoDeps): Promise<RunningDemo> {
   const convex = async (args: string[], { allowFail = false } = {}) => {
     const r = await d.run([...cli, ...args], cliEnv);
     const output = r.output.split("\n").filter((l) => l.trim() && !/ExperimentalWarning|trace-warnings|agent mode is in beta/.test(l)).slice(-12).join("\n");
+    // On Windows `convex run` can abort in libuv while exiting, after the function already finished
+    // (get-convex/convex-backend#175). Its exit code then means nothing; a failed function still says so.
+    if (r.code !== 0 && args[0] === "run" && /UV_HANDLE_CLOSING/.test(r.output) && !/Failed to run function/.test(r.output)) return { code: 0, output };
     if (r.code !== 0 && !allowFail) throw new DemoError(`\`convex ${args[0]}\` failed:\n${output}${/download|fetch failed|ENOTFOUND|ECONNRESET|403/i.test(output) ? "\nThe first run downloads the local Convex backend from github.com; check the network connection." : ""}`);
     return { code: r.code, output };
   };

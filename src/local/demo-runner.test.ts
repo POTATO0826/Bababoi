@@ -29,6 +29,8 @@ function harness(opts: {
   busyPorts?: number[];
   node?: () => string;
   platform?: NodeJS.Platform;
+  /** Overrides the CLI's result for a command (default: success). */
+  result?: (cmd: string[]) => { code: number; output: string } | undefined;
 } = {}): Harness {
   const files = new Map(Object.entries(opts.files ?? {}));
   const h: Harness = {
@@ -48,7 +50,7 @@ function harness(opts: {
       if (cmd.includes("dev") && cmd.includes("--once") && !/CONVEX_DEPLOYMENT=/.test(files.get(".env.local") ?? "")) {
         files.set(".env.local", `${files.get(".env.local") ?? ""}\n${opts.created ?? LOCAL_ENV}`);
       }
-      return { code: 0, output: "ok" };
+      return opts.result?.(cmd) ?? { code: 0, output: "ok" };
     },
     start: (cmd, env, log) => { h.starts.push({ cmd, env, log }); return { kill: () => {}, exited: Promise.resolve(0) }; },
     fetch: async (url, init) => {
@@ -175,6 +177,16 @@ describe("a clean start", () => {
     const ledger = h.fetches.find((f) => String(f.init.body).includes("ledger:snapshot"))!;
     expect((ledger.init.headers as Record<string, string>).Authorization).toMatch(/^Bearer ey/);
     expect(h.logs).toContain("Jarvis not connected yet: open the page and use Log in in Jarvis (No agent provider is configured (mocked status))");
+  });
+
+  test("Windows: `convex run` aborting on exit after its function finished does not fail the first run", async () => {
+    const abort = "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\\win\\async.c, line 76";
+    const h = harness({ result: (cmd) => (cmd[2] === "run" ? { code: 127, output: `"kn70qwws0nwvym8f05dhqntp318h8g06"\n${abort}` } : undefined) });
+    await runDemo(h.deps);
+    expect(h.runs.map((r) => r.cmd[3])).toContain("seed:run");
+    expect(h.logs).toContain("Loaded the synthetic demo data (first run).");
+    const failed = harness({ result: (cmd) => (cmd[3] === "seed:run" ? { code: 127, output: `✖ Failed to run function "seed:run":\nUncaught ConvexError: Demo data is disabled on this deployment\n${abort}` } : undefined) });
+    await refused(failed, DemoError, /`convex run` failed:[\s\S]*Demo data is disabled/);
   });
 
   test("restart keeps existing data; --reset reloads it; --setup-only starts no web server", async () => {
