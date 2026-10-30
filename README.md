@@ -7,213 +7,172 @@
 
 # WareOrb
 
-> A 3D warehouse with an AI assistant that helps small furniture retailers turn ageing stock into approved sales and free up shelf space, with the owner in control.
+> An open-source 3D warehouse with an AI assistant. It helps small retailers turn ageing stock into approved sales and free up shelf space, with the owner in control.
+
+[Live demo](https://wareorb-demo.vercel.app/) · [Demo video](https://youtu.be/it00xkj2OQo) · [Apache 2.0](LICENSE)
 
 ---
 
-## Team Information
+## What it does
 
-| Field                  | Details                                                                       |
-| ---------------------- | ----------------------------------------------------------------------------- |
-| **Team Name**          | Bababoi                                                                       |
-| **Team Domain**        | Domain 2 — Orbyte Smart SME Challenge                                         |
-| **SDG Track (1–17)**   | SDG 8 — Decent Work and Economic Growth · SDG 9 — Industry, Innovation and Infrastructure |
-| **Team Leader**        | Alfred Lee Khai Zher                                                          |
-| **University**         | Taylor's University                                                           |
-| **Number of Members**  | 3                                                                             |
+A warehouse can be full while the business needs different stock. Old batches sit in bays that should hold products that sell. Clearing them means finding a buyer, measuring the goods, getting delivery quotes and arranging collection, usually across spreadsheets and chat messages. Until the goods leave, the space stays taken and the stock records drift from what is on the shelves.
 
-## Links
+WareOrb puts the stock ledger, approvals and physical space in one place:
 
-| Resource          | Link                                  |
-| ----------------- | ------------------------------------- |
-| GitHub Repository | https://github.com/POTATO0826/Bababoi |
-| Live Demo         | https://wareorb-demo.vercel.app/      |
-| Slide Deck        | https://canva.link/23u3t20hv0yk7dx    |
-| Demo Video        | https://youtu.be/it00xkj2OQo          |
+1. It flags ageing batches and hands them to sales.
+2. Sales finds a buyer, confirms the measurements and gets delivery quotes.
+3. It checks the cargo fits the vehicle and sends the deal to the owner.
+4. Approval reserves the bays. The bay is freed only when warehouse staff confirm collection.
 
----
+**Jarvis** is the built-in AI assistant (Claude). It answers stock questions, shows items in the 3D warehouse and reads a supplier's delivery-note photo into an editable receiving draft. Jarvis can only read. People approve, post and collect.
 
-## Overview
+## Features
 
-### Problem
-
-A small furniture retailer's warehouse can be full while the business needs different stock. Older batches occupy bays that should hold products with proven sales. Clearing them means finding a buyer, measuring the goods, getting delivery quotes and arranging collection across spreadsheets and chat messages. Until the goods leave, the space stays occupied, and stock records drift from what is on the shelves.
-
-### Solution
-
-WareOrb connects the stock ledger, approvals and physical space in one workflow. It flags ageing batches and hands them to sales. It checks that the cargo fits a vehicle, compares real delivery quotes and prepares the owner's decision. Approval reserves the bays; the space is freed only when warehouse staff confirm collection.
-
-**Jarvis** is the AI assistant, built on Claude. It answers stock questions with read-only tools, shows each item in the 3D warehouse, and reads a supplier's delivery-note photo into an editable receiving draft. Tested rules calculate quantities and costs. People approve, post and collect. Jarvis cannot.
-
-> The demo uses synthetic data, labelled **Synthetic**. Lalamove runs in sandbox for quotes only; no driver is booked and no money is charged.
-
-### Key Features
-
-- **Capacity reallocation** — ageing batch → sales handoff → buyer and destination → confirmed measurements → delivery quotes → owner approval → confirmed collection frees the bay.
-- **Jarvis** — chat assistant with warehouse tools (inventory, movements, purchase orders, reorder analysis, show in warehouse) and delivery tools. Each tool call is shown; `/` commands open panels.
-- **3D digital twin** — two-floor isometric warehouse; bays show ageing, reserved, freed and inbound stock.
-- **Verified receiving** — photo reading, voice notes kept as evidence, measurements with units; staff count, confirm condition and assign bays before posting.
-- **Delivery quotes** — Lalamove sandbox (Malaysia) with a vehicle-fit check; expired, incomplete, outdated or synthetic quotes cannot be approved.
-- **Replenishment plan** — based on recorded sales, least stock cover first, within budget and free bays; items without a cost or sales history show the reason instead of a number.
-- **Roles and history** — Owner, Sales and Warehouse roles checked on the server; Clerk sign-in and staff invites for hosted use; every movement and decision recorded.
-
-### Tech Stack
-
-| Layer         | Technology                                                                    |
-| ------------- | ----------------------------------------------------------------------------- |
-| Frontend      | React 19, TypeScript, React Three Fiber + drei, Tailwind v4, shadcn/ui, zustand |
-| Backend       | Convex (local backend for the demo, Convex cloud for hosted use)              |
-| Database      | Convex — stock ledger, sales, quotes, receipts, purchase orders, history      |
-| AI            | Claude (Anthropic) through the Pi agent runtime — Jarvis tools and photo reading |
-| Voice         | Browser speech (Chrome / Edge); Fish Audio optional for hosted use            |
-| Integrations  | Lalamove sandbox API (quotes only)                                            |
-| Auth          | Clerk (hosted); local presenter sign-in (demo)                                |
-| Runtime / CI  | Bun, Node.js 24, GitHub Actions on Windows, macOS and Linux, gitleaks         |
-| AI / Compute  | RunPod — _TODO_                                                               |
-| Hosting / Dev | Replit — _TODO_                                                               |
+- **3D warehouse** with two floors. Bays show ageing, reserved, freed and inbound stock.
+- **Ageing stock to sale**: ageing batch → buyer → measurements → delivery quote → owner approval → collection frees the bay.
+- **Jarvis assistant** with read-only warehouse and delivery tools. Every tool call is shown.
+- **Receiving**: read a delivery note from a photo, keep voice notes as evidence, record measurements. Staff count and confirm before stock is posted.
+- **Delivery quotes** from the Lalamove sandbox (Malaysia) with a vehicle-fit check. Expired or incomplete quotes can't be approved.
+- **Replenishment plan** from recorded sales, within budget and free bays.
+- **Roles and history**: Owner, Sales and Warehouse roles are checked on the server, and every movement and decision is recorded.
 
 ---
 
-## Project Structure
+## Quick start
 
-```
-.
-├── .github/workflows/       # CI: checks on Windows, macOS, Linux + credential scan
-├── brand/                   # WareOrb logos
-├── convex/                  # Backend: schema, ledger, deals, quotes, receiving, replenish, access
-├── docs/                    # Concept, local demo guide, deployment guide
-├── replit/                  # Replit proof of use (PDF)
-├── scripts/
-│   ├── demo.ts              # `bun run demo`: local backend, demo data and web server
-│   ├── smoke-demo.ts        # First-run startup test
-│   └── build-production.ts  # Hosted release build
-├── src/
-│   ├── components/          # UI (shadcn/ui): Jarvis, work panels, details, delivery
-│   ├── domain/              # Business rules + tests, shared by Convex and the browser
-│   ├── local/               # Demo server: Jarvis agent, tools, Lalamove client
-│   ├── scene/               # 3D warehouse (React Three Fiber)
-│   ├── voice/               # Recording, transcripts, speech
-│   └── index.ts             # Bun server entry point
-├── submission/              # Required submission PDFs
-├── tests/browser/           # Browser test harness
-├── .env.example             # Configuration template (names only)
-├── LICENSE
-└── README.md
-```
-
-### Architecture
-
-```
-Staff (Owner · Sales · Warehouse)
-        │  clicks · / commands · chat · photos · voice notes
-        ▼
-Browser — React + 3D warehouse + Jarvis
-        │                                  │
-        │ live queries / mutations         │ agent + connection routes
-        ▼                                  ▼
-Convex                              WareOrb server (Bun)
-  stock ledger, sales, quotes,  ◄──►  Jarvis agent (Pi), keys in memory only
-  receipts, replenishment,             ├──► Claude    (answers, photo reading)
-  history                              └──► Lalamove  (sandbox quotes)
-```
-
-Jarvis calls the same authorised Convex functions as the screens, so it follows the same rules.
-
----
-
-## How to Run
-
-### Run Locally (Windows, macOS or Linux)
-
-Install **Bun 1.4.3+** ([bun.sh](https://bun.sh/docs/installation)) and **Node.js 24 LTS** ([nodejs.org](https://nodejs.org/en/download)), then reopen the terminal. On macOS: `brew install bun node@24`.
+You need **[Bun](https://bun.sh/docs/installation) 1.4.3+** and **[Node.js](https://nodejs.org/en/download) 20, 22 or 24** (24 recommended). Works on Windows, macOS and Linux.
 
 ```sh
 git clone https://github.com/POTATO0826/Bababoi.git
 cd Bababoi
 bun install --frozen-lockfile
-bun run demo                    # http://127.0.0.1:3000
+bun run demo
 ```
 
-The first run downloads the local backend and loads synthetic data, so it needs internet. `Ctrl+C` stops the app, and `bun run demo` restarts it with the same data. `bun run demo:reset` replaces the data with a fresh demo set.
+Open **http://127.0.0.1:3000**. There is no login page: you are signed in as the owner and the warehouse is filled with synthetic sample data.
 
-No account or `.env` editing is needed. Connect services in the page:
+| Command | What it does |
+| --- | --- |
+| `bun run demo` | Start the app. The first run downloads the local database and needs internet. |
+| `Ctrl+C` | Stop. Your data is kept for the next start. |
+| `bun run demo:reset` | Start with a fresh copy of the sample data. |
 
-- **Claude:** Jarvis → **Log in** (or `/login`). `/logout` disconnects.
-- **Lalamove sandbox:** Delivery → **Connect** with your sandbox key and secret.
+> Don't copy `.env.local` or `.convex/` from another computer. The first run creates its own.
 
-Keys stay in the server's memory for that run only. Don't copy `.env.local` from another computer; startup creates its own, and refuses to start with a cloud `.env.local`.
+## How to use it
 
-**Quick tour:** open sale **D-1002** → add a quote → send for approval → approve (bays reserved) → record carrier reference → confirm collection (bay freed).
+### Moving around
 
-More: [local demo guide, demo data and troubleshooting](docs/local-demo.md) · [hosted deployment](docs/deployment.md) · [configuration template](.env.example). Voice transcripts need Chrome or Edge; photo reading needs Claude connected.
+- **Drag** to rotate the 3D warehouse and **scroll** to zoom. Click a zone to zoom in, then a bay to see its stock. **Double-click** resets the view.
+- Type **`/`** in Jarvis to open a panel:
 
-### Run Tests
+| Command | Panel |
+| --- | --- |
+| `/ageing` | Ageing stock ready to hand to sales |
+| `/deals` | Sales in progress |
+| `/delivery` | Delivery quotes for a sale |
+| `/approve` | Sales waiting for the owner's approval |
+| `/collect` | Approved sales to collect |
+| `/receive` | Incoming deliveries to check and post |
+| `/replenish` | What to reorder, within budget |
+
+### Try the full flow
+
+1. Open sale **D-1002** (`/deals`).
+2. **Add quote**, record the carrier's reply, then **Send for approval**.
+3. In `/approve`, **Approve** it. The bay is now reserved.
+4. **Record carrier reference**, then record the collected units in `/collect`. The bay turns green (freed) and stock updates.
+
+### Connect Jarvis (optional)
+
+Everything works without AI. To chat with Jarvis or read delivery-note photos:
+
+1. In Jarvis, click **Log in** (or type `/login`).
+2. Paste a [Claude API key](https://console.anthropic.com/) and press **Log in**.
+
+Type `/logout` to disconnect. The key is kept in memory only, never written to disk, so you log in again after restarting.
+
+### Connect Lalamove (optional)
+
+For real delivery prices, open `/delivery` → **Connect** and enter a Lalamove **sandbox** key and secret (Malaysia). WareOrb only asks for quotes. It never books a driver or charges money.
+
+More detail, the sample data and troubleshooting: **[docs/local-demo.md](docs/local-demo.md)**.
+
+---
+
+## Hosting it for a team
+
+`bun run demo` runs everything on one computer. To host WareOrb for real staff, it uses Convex cloud for the database and Clerk for staff sign-in, with owner invites. See **[docs/deployment.md](docs/deployment.md)** and the settings in **[.env.example](.env.example)**.
+
+## Tests
 
 ```sh
-bun run check          # unit + Convex tests, both typechecks, production build
-bun run test:startup   # clean first run and restart, then cleanup
-bun run test:browser   # Chromium harness for Jarvis, measurements, Lalamove (needs Playwright)
+bun run check          # unit + backend tests, typechecks and production build
+bun run test:startup   # clean first start and restart
+bun run test:browser   # browser tests (needs Playwright)
 ```
 
-GitHub Actions runs `check` and `test:startup` on Windows, macOS and Linux, plus a full-history credential scan.
+GitHub Actions runs these on Windows, macOS and Linux, plus a secret scan.
+
+## Project structure
+
+```
+.
+├── brand/          # Logos
+├── convex/         # Backend: schema, stock ledger, deals, quotes, receiving, access
+├── docs/           # Guides: local demo, deployment, concept
+├── scripts/        # `bun run demo`, startup test, production build
+├── src/
+│   ├── components/ # UI (shadcn/ui): Jarvis, panels, delivery
+│   ├── domain/     # Business rules + tests, shared by backend and browser
+│   ├── local/      # Local server: Jarvis agent, tools, Lalamove client
+│   ├── scene/      # 3D warehouse (React Three Fiber)
+│   ├── voice/      # Recording, transcripts, speech
+│   └── index.ts    # Bun server entry
+└── tests/browser/  # Browser test harness
+```
+
+### How it fits together
+
+```
+Browser — React + 3D warehouse + Jarvis
+        │                                  │
+        │ live queries / mutations         │ agent + connection routes
+        ▼                                  ▼
+Convex                              WareOrb server (Bun)
+  stock ledger, sales, quotes,  ◄──►  Jarvis agent, keys in memory only
+  receipts, replenishment,             ├──► Claude    (answers, photo reading)
+  history                              └──► Lalamove  (sandbox quotes)
+```
+
+Jarvis calls the same server functions as the screens, so it follows the same rules.
+
+### Built with
+
+React 19 · TypeScript · React Three Fiber · Tailwind v4 · shadcn/ui · zustand · Convex · Bun · Claude (Anthropic) · Lalamove sandbox API · Clerk (hosted sign-in)
 
 ---
 
-## How We Use Replit *(Required)*
+## Contributing
 
-_TODO: describe how the team used Replit (development, hosting, secrets)._
+Issues and pull requests are welcome.
 
-📄 Proof of use: [`replit/SDC2026_TeamName_Replit_POU.pdf`](replit)
+1. Fork the repo and create a branch.
+2. Run `bun run demo` to try your change.
+3. Run `bun run check` before opening a pull request.
 
-## How We Use RunPod *(Required)*
+Never commit API keys or `.env.local`.
 
-_TODO: describe the RunPod workload, setup and integration._
+## Authors
 
-📄 Proof of use: [`submission/SDC2026_TeamName_Runpod_POU.pdf`](replit)
+Built by team **Bababoi** at Taylor's University.
 
----
-
-## Challenges & Learnings
-
-- **One source of truth.** The 3D map, panels, badges and Jarvis all read one Convex ledger, so they never disagree.
-- **AI that does not invent numbers.** Jarvis's tools are read-only. Unknown measurements or costs stay unknown, never zero, and quantities come from tested rules.
-- **Approval is not empty space.** Approving a sale only reserves stock; stock falls and the bay frees only when collection is confirmed.
-- **Quotes you can trust.** A quote shows Lalamove's own expiry and goes stale when the cargo or route changes. Synthetic replies can never be approved.
-- **Keys never touch disk.** Credentials entered in the page live only in server memory, and the demo refuses to run against a cloud database.
-- **One command on any laptop.** `bun run demo` sets up the backend, data and server, and CI tests it on Windows, macOS and Linux.
-
-## Future Improvements
-
-- [ ] Pilot with furniture retailers to measure decision time, avoidable costs and stock accuracy
-- [ ] Hosted launch with production sign-in and a domain
-- [ ] Real carrier booking after approval (currently simulated)
-- [ ] End-of-day stock report to WhatsApp
-- [ ] Orbyte platform connector
-- [ ] Mobile layout
-
-## Team
-
-| Name                 | Role                                      | GitHub                                         |
-| -------------------- | ----------------------------------------- | ---------------------------------------------- |
-| Alfred Lee Khai Zher | Team lead, pitch and business case        | [@AlfredLeeKZ](https://github.com/AlfredLeeKZ) |
-| Vince Loo Yi Sheng   | Frontend, 3D warehouse and Convex backend | [@POTATO0826](https://github.com/POTATO0826)   |
-| Deng Zhen Quan       | Production backend, auth and promo video  | [@quinnDzq](https://github.com/quinnDzq)       |
-
----
-
-## Submission Checklist
-
-- [x] Team name, domain (Domain 1 / Domain 2) and SDG track filled in
-- [x] Slide deck link added
-- [x] Demo video link added
-- [x] Replit used, with proof of use in `replit/`
-- [ ] RunPod used, with proof of use in `submission/`
-- [x] Preliminary submission completed (`SDC2026_TeamName_Preliminary.pdf`)
-- [x] Technology declaration completed (`SDC2026_TeamName_TechDeclaration.pdf`)
-- [x] Submission files renamed with your team name (replace `TeamName`)
-- [x] "How to Run" steps verified
-- [x] No API keys or secrets committed to the repository
+| Name | GitHub |
+| --- | --- |
+| Alfred Lee Khai Zher | [@AlfredLeeKZ](https://github.com/AlfredLeeKZ) |
+| Vince Loo Yi Sheng | [@POTATO0826](https://github.com/POTATO0826) |
+| Deng Zhen Quan | [@quinnDzq](https://github.com/quinnDzq) |
 
 ## License
 
-This project is licensed under the [Apache License 2.0](LICENSE).
+[Apache License 2.0](LICENSE)
